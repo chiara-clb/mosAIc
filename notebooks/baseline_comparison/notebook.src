@@ -72,10 +72,30 @@ OUTCOMES = ("fall", "flat", "gain")
 VERSIONS = ("A", "B", "C", "D", "Fixed guess")
 EXTRA_VERSIONS = ("Prompt only", "Prompt-only average")
 
+#%% core
+def main_results(r202, reports, max_gap_days=75):
+    """Keep one results announcement per quarter.
+
+    Some companies also use item 2.02 for mid-quarter updates (Chevron's "interim update", for example).
+    The real results come just before the quarter's 10-Q or 10-K, so for each report the last item-2.02
+    filing in the 75 days before it is kept. Results announced after the latest report are kept too.
+    """
+    r202 = sorted(set(r202))
+    kept = set()
+    for rep in reports:
+        before = [a for a in r202 if rep - timedelta(days=max_gap_days) <= a <= rep]
+        if before:
+            kept.add(before[-1])
+    last_rep = max(reports) if reports else None
+    tail = [a for a in r202 if last_rep is None or a > last_rep]
+    if tail:
+        kept.add(tail[-1])
+    return sorted(kept)
+
 #%% md
 ## 2. Data: results dates and prices
 
-Results dates come from the SEC's list of each company's filings: an 8-K with item 2.02 is a results announcement. Only the list is downloaded, not the documents, so this takes a minute. Prices come from Yahoo Finance (adjusted closes).
+Results dates come from the SEC's list of each company's filings: an 8-K with item 2.02 is a results announcement. Some companies also use item 2.02 for mid-quarter updates, so only one per quarter is kept: the last one before the quarter's 10-Q or 10-K report (section 1). Only the list of filings is downloaded, not the documents, so this takes a minute. Prices come from Yahoo Finance (adjusted closes).
 
 #%% code
 import json, re, time, requests
@@ -88,24 +108,30 @@ def sec_get(url):
     r.raise_for_status()
     return r
 
-def results_times(cik):
-    """Acceptance times (UTC) of every results 8-K (item 2.02), over the full filing history."""
+def filing_times(cik):
+    """Acceptance times (UTC) of every results 8-K (item 2.02) and every 10-Q / 10-K, over the full history."""
     sub = sec_get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json").json()
     blocks = [sub["filings"]["recent"]] + [sec_get(f"https://data.sec.gov/submissions/{p['name']}").json()
                                            for p in sub["filings"].get("files", [])]
-    out = []
+    r202, reports = [], []
     for b in blocks:
         for form, items, acc in zip(b["form"], b.get("items", [""] * len(b["form"])), b["acceptanceDateTime"]):
+            when = datetime.fromisoformat(acc.replace("Z", "+00:00")).astimezone(timezone.utc)
             if form == "8-K" and "2.02" in str(items):
-                out.append(datetime.fromisoformat(acc.replace("Z", "+00:00")).astimezone(timezone.utc))
-    return sorted(out)
+                r202.append(when)
+            elif form in ("10-Q", "10-K"):
+                reports.append(when)
+    return sorted(r202), sorted(reports)
 
 company_list = sec_get("https://www.sec.gov/files/company_tickers.json").json().values()
 cik_map = {v["ticker"].upper(): int(v["cik_str"]) for v in company_list}
 NAMES = {v["ticker"].upper(): v["title"] for v in company_list}
-RESULTS = {t: results_times(cik_map[t]) for t in TICKERS}
+RESULTS = {}
 for t in TICKERS:
-    print(f"{t}: {len(RESULTS[t])} results filings since {RESULTS[t][0].date() if RESULTS[t] else '-'}")
+    r202, reports = filing_times(cik_map[t])
+    RESULTS[t] = main_results(r202, reports)
+    print(f"{t}: {len(r202)} item-2.02 filings, {len(RESULTS[t])} kept as quarterly results "
+          f"({len(RESULTS[t]) / max(1, (RESULTS[t][-1] - RESULTS[t][0]).days / 365.25):.1f} a year)" if RESULTS[t] else f"{t}: none found")
 
 #%% code
 import yfinance as yf
