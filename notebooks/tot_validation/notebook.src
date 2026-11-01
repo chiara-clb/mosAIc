@@ -1,0 +1,106 @@
+#%% md
+# MosAIc Checkpoint 4: validating the Tree of Thought design
+
+MosAIc forecasts whether a large US stock will fall a lot, stay roughly flat or rise a lot over the next 21 trading days, and explains the forecast with a ledger: one cited line per piece of evidence, each shifting the three probabilities.
+
+Checkpoint 4 replaced the single-pass synthesis step with a Tree of Thought (ToT) search over possible readings of the evidence. This notebook builds only that slice of the agent, like the Checkpoint 3 notebook did for retrieval, and tests the design decisions on real filings and prices:
+
+1. **Does searching over readings help?** Same evidence, four ways of turning it into a forecast: prompt only, single pass, greedy ToT (beam 1) and the full design (beam 3).
+2. **Can "no effect" win against standard wording?** The Apple legal-proceedings case from Checkpoint 3, shown as a tree.
+3. **Are beam width 3 and the 0.3 pruning margin sensible?** A sweep that costs no extra model calls.
+4. **Search error or scoring error?** Does the beam find the ledger the scoring likes best, and does the scoring like the ledgers that turned out right?
+5. **Does it fit the budget?** Model calls and time per forecast.
+
+**What this notebook cannot test yet.** The main metric in the design is log loss against the probabilities implied by option prices, and that data is not bought yet. Here every forecast is scored against what actually happened (Brier score). With about 20 forecasts that is an indication, not a proof. The scoring weights stay at their defaults, since tuning them needs the option data.
+
+**Before you run:** set `USER_AGENT` to your name and email (the SEC requires it). Use a GPU runtime (Runtime → Change runtime type → T4 GPU).
+
+#%% md
+## 1. How the design answers the paper's four questions
+
+Yao et al. (2023) describe any ToT system by four choices. The class lab answered them for Game of 24. MosAIc answers them like this:
+
+| Question | Game of 24 (lab) | MosAIc |
+| --- | --- | --- |
+| What is one thought? | one equation | one reading of one evidence item: effect (fall, gain, wider spread, no effect), size and a one-sentence reason |
+| Generator: sample or propose? | propose k next steps in one prompt | **propose**: the model gives two readings of an item in one call, and code always adds "no effect" as the third |
+| Evaluator: value or vote? | value: sure / likely / impossible | **value**: each partial ledger gets a score from base rate, novelty and consistency |
+| Search | ToT-BFS with breadth b = 5, depth 3 | ToT-BFS (beam search) with breadth 3, depth up to 5 |
+
+The lab used exact Python checks (`solve24`, `parse_equation`) wherever it could and asked the model only when code could not decide. MosAIc does the same: code checks dates, novelty, base rates and the cap on the total shift, and the model is used only to propose readings and to check that a passage really says what a reading claims.
+
+#%% code
+!pip install -q sentence-transformers transformers accelerate beautifulsoup4 lxml yfinance scipy
+
+#%% md
+## 2. Settings
+
+Everything that can change a result is set here.
+
+#%% core
+# --- Required: the SEC asks every automated request to identify itself ---
+USER_AGENT = "Your Name your.email@example.com"
+
+# Stocks to forecast, and the stocks whose filing history feeds case memory
+TICKERS = ["AAPL", "NKE", "INTC"]
+CASE_TICKERS = ["AAPL", "MSFT", "NVDA", "INTC", "GOOGL", "META", "NFLX", "AMZN", "TSLA", "NKE",
+                "JPM", "GS", "V", "JNJ", "UNH", "LLY", "PG", "KO", "WMT", "XOM", "CVX",
+                "CAT", "BA", "LMT", "NEE", "DUK", "PLD", "AMT", "LIN", "FCX"]
+
+# Forecast dates: 2 days after each results filing (8-K item 2.02) in this window.
+# The window ends early enough for the 21-trading-day outcome to be known.
+START_DATE, END_DATE = "2025-01-01", "2026-09-25"
+DAYS_AFTER_RESULTS = 2
+
+# Forecast definition (Checkpoint 1.1)
+HORIZON = 21              # trading days
+SIGMA_LOOKBACK = 252      # one year of daily returns
+BUCKET_K = 0.5            # fall < -0.5 sigma, gain > +0.5 sigma
+
+# Documents and retrieval (Checkpoint 3)
+FORMS = {"10-Q", "10-K", "8-K"}
+CHUNK_WORDS, OVERLAP_WORDS = 150, 30
+EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+FRESH_DAYS = 30
+K_CANDIDATES, K_FINAL, MMR_LAMBDA, MIN_SCORE = 20, 5, 0.7, 0.30
+QUERIES = [                       # fixed searches, in place of the ReAct loop
+    "quarterly results revenue and guidance outlook",
+    "legal proceedings, investigations and major risks",
+    "acquisitions, agreements, restructuring and management changes",
+]
+
+# Ledger (Checkpoint 1.1 and 4)
+STRENGTH_POINTS = {"small": 3, "medium": 6, "large": 9}
+MAX_TOTAL_SHIFT = 15      # points per outcome
+MIN_PROB = 1.0            # percent; every outcome stays possible
+
+# Tree of Thought (Checkpoint 4)
+BEAM_WIDTH = 3
+PRUNE_MARGIN = 0.3
+MAX_DEPTH = 5
+MAX_MODEL_CALLS = 25
+KEEP_NO_EFFECT_NODE = True        # the all-"no effect" ledger (the baseline) is always kept
+WEIGHTS = {"base_rate": 0.4, "novelty": 0.4, "consistency": 0.2}   # defaults; tuning needs option data
+SAME_STORY_SIMILARITY = 0.85      # two passages this similar describe the same story
+
+# Case memory
+PRIOR_STRENGTH = 20       # pseudo-events pulling small samples toward the overall frequencies
+BASE_RATE_SCALE = 0.02    # how fast the base-rate score moves away from 0.5
+
+# Language model: "hf" (local Hugging Face model), "openai" or "anthropic"
+LLM_BACKEND = "hf"
+LLM_MODEL = "Qwen/Qwen2.5-3B-Instruct"     # or "Qwen/Qwen2.5-7B-Instruct" for better readings
+
+BRANCH_LOG = "branch_log.jsonl"
+TRACE_FILE = "traces.jsonl"
+
+#%% core
+import json, math, re, time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+import numpy as np
+import pandas as pd
+from scipy.stats import norm
+
+OUTCOMES = ("fall", "flat", "gain")
+EFFECTS = ("fall", "gain", "spread", "none")
