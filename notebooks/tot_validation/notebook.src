@@ -190,8 +190,16 @@ def split_sections(text, label):
     return out or [("Full text", text.strip())]
 
 def section_key(section):
-    """'Item 1A. Risk Factors' -> 'item 1a', so the same section can be found in the previous filing."""
-    m = re.match(r"item\s+(\d+[a-z]?)", section.strip(), re.I)
+    """'Item 1A. Risk Factors' -> 'risk factors', so the same section can be found in the previous filing.
+
+    The title is used instead of the item number, because 10-Qs and 10-Ks number their items
+    differently (legal proceedings are Item 1 of part II in a 10-Q, Item 3 in a 10-K).
+    """
+    title = re.sub(r"^\s*item\s+\d+[a-z]?\.?", "", section.strip(), flags=re.I)
+    words = re.findall(r"[a-z]+", title.lower())
+    if words:
+        return " ".join(words[:4])
+    m = re.match(r"\s*item\s+(\d+[a-z]?)", section, re.I)
     return f"item {m.group(1).lower()}" if m else section.strip().lower()
 
 def chunk_words(text, size=None, overlap=None):
@@ -425,3 +433,167 @@ for t in sorted(set(CASE_TICKERS) | set(TICKERS)):
     px = yf.download(t, start="2012-01-01", progress=False, auto_adjust=True)["Close"]
     PRICES[t] = px.squeeze().dropna()
     print(f"{t}: {len(PRICES[t])} days from {PRICES[t].index[0].date()}")
+
+#%% md
+## 7. Ledger arithmetic
+
+Each reading becomes a line that shifts the three probabilities by small (3), medium (6) or large (9) points, and every line sums to zero:
+
+| Effect | Fall | Flat | Gain |
+| --- | --- | --- | --- |
+| fall, size s | +s | −s/3 | −2s/3 |
+| gain, size s | −2s/3 | −s/3 | +s |
+| wider spread (new), size s | +s/2 | −s | +s/2 |
+| no effect | 0 | 0 | 0 |
+
+If the lines together move any outcome by more than 15 points, all lines are scaled down together. Every outcome keeps at least 1%.
+
+#%% core
+def shift_for(effect, size):
+    if effect == "none":
+        return {"fall": 0.0, "flat": 0.0, "gain": 0.0}
+    s = float(STRENGTH_POINTS[size])
+    return {"fall": {"fall": s, "flat": -s / 3, "gain": -2 * s / 3},
+            "gain": {"fall": -2 * s / 3, "flat": -s / 3, "gain": s},
+            "spread": {"fall": s / 2, "flat": -s, "gain": s / 2}}[effect]
+
+def apply_ledger(base, readings):
+    """Baseline plus the readings' shifts, capped and floored. Returns (final, cap_factor)."""
+    total = {k: sum(shift_for(r["effect"], r["size"])[k] for r in readings) for k in OUTCOMES}
+    biggest = max(abs(v) for v in total.values())
+    factor = MAX_TOTAL_SHIFT / biggest if biggest > MAX_TOTAL_SHIFT else 1.0
+    raw = {k: max(base[k] + factor * total[k], 0.0) for k in OUTCOMES}
+    return floor_and_normalise(raw), factor
+
+def floor_and_normalise(p):
+    """Scale to 100 while keeping every outcome at MIN_PROB or more (floors hold after rescaling)."""
+    floored = set()
+    while True:
+        free = [k for k in OUTCOMES if k not in floored]
+        room = 100.0 - MIN_PROB * len(floored)
+        s = sum(p[k] for k in free)
+        out = {k: (MIN_PROB if k in floored else (room * p[k] / s if s > 0 else room / len(free))) for k in OUTCOMES}
+        low = [k for k in free if out[k] < MIN_PROB]
+        if not low:
+            return {k: round(v, 2) for k, v in out.items()}
+        floored.update(low)
+
+def total_shift(readings):
+    """Size of a ledger's move away from the baseline, used to break ties (smaller wins)."""
+    total = {k: sum(shift_for(r["effect"], r["size"])[k] for r in readings) for k in OUTCOMES}
+    return sum(abs(v) for v in total.values())
+
+#%% md
+## 8. Case memory: base rates
+
+**The question behind the score.** For a reading like "this management change points to a fall, medium size", case memory asks: *if we had applied this shift after every past event of the same type, would those forecasts have scored better?* This checks both the direction and the size of a reading against history, which is what the Checkpoint 3 feedback asked for.
+
+**How it works.**
+
+1. **Events** are past filings of the 30 stocks, labelled by type: the 8-K item number (2.02 results, 5.02 management change, 1.01 agreement, and so on) or the report type (10-Q, 10-K).
+2. **Same timing as the forecast.** If the evidence was filed 9 days before the forecast date, each past event's 21-day window also starts 9 days after that event. So results already reflected in the price count as already priced in.
+3. **No look-ahead.** Only past events whose 21-day window ended before the forecast date are used.
+4. **Small samples are pulled toward the overall frequencies** (the share of all 21-day windows that ended in a fall, flat month or gain), with a weight of 20 pseudo-events. A rare event type therefore says little, and "no effect" wins.
+5. **The score** is the average improvement in log score from applying the shift, mapped to 0–1. "No effect" always scores 0.5, the neutral point.
+
+#%% core
+class CaseMemory:
+    def __init__(self, events, prices):
+        """events: {ticker: [(event_key, accepted_datetime), ...]}; prices: {ticker: Series of closes}."""
+        self.events, self.cache = events, {}
+        self.px = {}
+        for t, s in prices.items():
+            s = s.dropna()
+            self.px[t] = (np.array(s.index.values, dtype="datetime64[D]"), np.log(s.to_numpy(dtype=float)))
+
+    def window(self, ticker, start_date):
+        """Bucket of the 21 trading days from start_date, and the date the window ends."""
+        key = (ticker, start_date)
+        if key not in self.cache:
+            dates, logp = self.px[ticker]
+            i = int(np.searchsorted(dates, np.datetime64(start_date, "D")))   # first close on or after start
+            if i < SIGMA_LOOKBACK // 2 + 1 or i + HORIZON - 1 >= len(dates):
+                self.cache[key] = (None, None)
+            else:
+                r = np.diff(logp[max(0, i - 1 - SIGMA_LOOKBACK):i])
+                sigma = float(r.std() * math.sqrt(HORIZON))
+                ret = float(logp[i + HORIZON - 1] - logp[i - 1])
+                b = "fall" if ret < -BUCKET_K * sigma else "gain" if ret > BUCKET_K * sigma else "flat"
+                self.cache[key] = (b, pd.Timestamp(dates[i + HORIZON - 1]).date())
+        return self.cache[key]
+
+    def overall(self, as_of):
+        """Share of all 21-day windows (weekly starts, all stocks) ending in each bucket, before as_of."""
+        counts = dict.fromkeys(OUTCOMES, 0)
+        for t, (dates, _) in self.px.items():
+            for d in dates[SIGMA_LOOKBACK::5]:
+                b, end = self.window(t, pd.Timestamp(d).date())
+                if b and end < as_of.date():
+                    counts[b] += 1
+        n = sum(counts.values())
+        return {k: counts[k] / n for k in OUTCOMES} if n else {"fall": 0.3085, "flat": 0.383, "gain": 0.3085}
+
+    def distribution(self, event, lag_days, as_of, p0=None):
+        """Smoothed bucket frequencies after past events of this type, and the number of events used."""
+        p0 = p0 or self.overall(as_of)
+        counts = dict.fromkeys(OUTCOMES, 0)
+        for t, evs in self.events.items():
+            for key, accepted in evs:
+                if key != event or accepted >= as_of:
+                    continue
+                b, end = self.window(t, accepted.date() + timedelta(days=lag_days))
+                if b and end < as_of.date():
+                    counts[b] += 1
+        n = sum(counts.values())
+        q = {k: (counts[k] + PRIOR_STRENGTH * p0[k]) / (n + PRIOR_STRENGTH) for k in OUTCOMES}
+        return q, n, p0
+
+    def score(self, effect, size, event, lag_days, as_of, p0=None):
+        """0-1 score; 0.5 = no evidence either way. Returns (score, details)."""
+        if effect == "none":
+            return 0.5, {"n_events": None}
+        q, n, p0 = self.distribution(event, lag_days, as_of, p0)
+        s = shift_for(effect, size)
+        p1 = {k: max(p0[k] + s[k] / 100, 0.01) for k in OUTCOMES}
+        z = sum(p1.values())
+        gain = sum(q[k] * (math.log(p1[k] / z) - math.log(p0[k])) for k in OUTCOMES)
+        return 0.5 + 0.5 * math.tanh(gain / BASE_RATE_SCALE), {"n_events": n, "log_gain": gain, "q": q}
+
+#%% md
+## 9. Novelty
+
+Companies repeat the same wording every quarter. A passage is compared with the same section of the company's previous filing of the same kind (the previous 10-Q or 10-K for a report section, the previous 8-K with the same item for an 8-K). Novelty is 1 minus the highest similarity to any chunk there. Wording repeated almost word for word scores near 0. When there is no previous filing in the index, the passage counts as new and this is flagged.
+
+For the readings: a reading that claims an effect gets the novelty score, and "no effect" gets 1 minus it. Repeated wording therefore favours "no effect".
+
+#%% core
+def previous_filing_rows(index, item):
+    family = ("10-Q", "10-K") if item["form"] in ("10-Q", "10-K") else ("8-K",)
+    acc = datetime.fromisoformat(item["accepted"])
+    rows = [i for i, c in enumerate(index.chunks)
+            if c["ticker"] == item["ticker"] and c["form"] in family and c["filing"] != item["filing"]
+            and c["section_key"] == item["section_key"] and index.accepted[i] < acc
+            and (c["form"] != "8-K" or c["event"] == item["event"])]
+    if not rows:
+        return [], None
+    latest = max(index.accepted[i] for i in rows)
+    prev_filing = next(index.chunks[i]["filing"] for i in rows if index.accepted[i] == latest)
+    return [i for i in rows if index.chunks[i]["filing"] == prev_filing], prev_filing
+
+def novelty(index, item):
+    """(novelty 0-1, previous filing id or None)."""
+    rows, prev = previous_filing_rows(index, item)
+    if not rows:
+        return 1.0, None
+    sim = float(np.max(index.emb[rows] @ index.emb[item["row"]]))
+    return float(min(max(1.0 - sim, 0.0), 1.0)), prev
+
+def reading_novelty(effect, nov):
+    return 1.0 - nov if effect == "none" else nov
+
+#%% code
+EVENTS = {t: [(event_key(r["form"], r.get("items", "")), parse_accepted(r["acceptanceDateTime"])) for r in FILINGS[t]]
+          for t in CASE_TICKERS}
+CASE = CaseMemory(EVENTS, {t: PRICES[t] for t in CASE_TICKERS})
+print("Event types with the most history:")
+print(pd.Series([k for evs in EVENTS.values() for k, _ in evs]).value_counts().head(12))

@@ -26,7 +26,15 @@ def test_html_to_text_drops_hidden_xbrl():
 def test_sections_skip_contents_entries():
     secs = ns["split_sections"](ns["html_to_text"](FILING_HTML), "Main document")
     assert [s[0] for s in secs] == ["Item 1A. Risk Factors", "Item 3. Legal Proceedings"]
-    assert ns["section_key"](secs[1][0]) == "item 3"
+    assert ns["section_key"](secs[1][0]) == "legal proceedings"
+
+
+def test_section_key_matches_10q_and_10k_titles():
+    sk = ns["section_key"]
+    assert sk("Item 1. Legal Proceedings") == sk("Item 3. Legal Proceedings") == "legal proceedings"
+    assert sk("Item 1. Financial Statements") != sk("Item 1. Legal Proceedings")
+    assert sk("Press release") == "press release"
+    assert sk("Item 7") == "item 7"
 
 
 def test_chunks_have_size_and_overlap():
