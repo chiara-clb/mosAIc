@@ -47,7 +47,7 @@ Status: **built** = working in the notebook; **partly** = a simpler version exis
 
 ## 3. Where the documents disagree or leave a gap
 
-Each item has a recommendation. Decisions so far: 3.1, 3.3 and 3.4 accepted as recommended; 3.2 still open; 3.5 to 3.8 follow the recommendations unless revisited.
+Each item has a recommendation. Decisions so far: 3.1, 3.3, 3.4 and 3.8 decided; 3.2 still open; 3.5 to 3.7 and 3.9 follow the recommendations unless revisited.
 
 ### 3.1 The answer key has no data source yet
 
@@ -91,7 +91,13 @@ Each item has a recommendation. Decisions so far: 3.1, 3.3 and 3.4 accepted as r
 
 **Recommendation:** keep the estimate, log it, and report forecasts near the window edges separately. A real earnings calendar can replace it later behind the same function.
 
-### 3.8 Smaller gaps
+### 3.8 How the five evidence items for ToT are chosen
+
+**Issue:** the research loop runs up to 4 searches of 5 passages each, but ToT takes at most five items, and no document said how they are picked. The notebook took the 10 newest.
+
+**Decision:** pool the passages from all searches, keep the best passage per filing, then run MMR to 5, using each passage's best score across the searches as its relevance. MMR decides which evidence goes in; ToT decides what it means. A reranking model and one passage per topic are later experiments, compared with MMR on the same past dates.
+
+### 3.9 Smaller gaps
 
 - **Reflection notes** are written but never read; the pipeline will add the latest notes to the research prompt.
 - **News agent** is MVP in the full design but a second step in Checkpoint 3; this build adds the interface and the leakage filter, and the API comes later.

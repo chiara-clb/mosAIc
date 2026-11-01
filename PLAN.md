@@ -26,7 +26,7 @@ Build the application from the full design, checked part by part against the ini
 | --- | --- | --- |
 | 4 | `trace.py`: JSONL trace and leakage audit | Planted late source is caught |
 | 5 | `edgar.py`: download, clean, sections, chunks, answer-key leakage filter | Fixture filings; sentences quoting implied moves dropped |
-| 6 | `index.py`: embeddings, date-filtered search, MMR, "nothing found" | Hand-made vectors: no late chunks, MMR drops near-copies, threshold |
+| 6 | `index.py`: embeddings, date-filtered search, MMR, "nothing found"; `select_evidence`: pool all search results, keep the best passage per filing, MMR to 5 using each passage's best score across the searches (design review 3.8) | Hand-made vectors: no late chunks, MMR drops near-copies, threshold; evidence selection keeps one passage per filing and returns at most 5 |
 | 7 | `prices.py` and `coordinator.py`: price loader, results dates from 8-K item 2.02, earnings-in-window estimate | Window edges; no later data |
 | 8 | `baseline.py`: EWMA (GARCH optional), earnings-move mix, optional frozen ratio, fallback | Steady volatility gives about 31/38/31; earnings widens both tails |
 | 9 | `ledger.py`: fall, gain, wider spread, no effect; cap; floors | Each line sums to zero; cap scales all lines together |
@@ -66,4 +66,4 @@ This workspace can't reach PyPI, SEC EDGAR, Yahoo Finance or Hugging Face, and L
 
 ## Later (not in this build)
 
-News API and GDELT, topic-based superseding, λ tuning on labelled queries, real earnings calendar.
+News API and GDELT, topic-based superseding, λ tuning on labelled queries, real earnings calendar. Experiments on choosing the five evidence items, compared with MMR on the same past dates: a reranking model (seen in class) and one passage per topic.
