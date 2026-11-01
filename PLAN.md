@@ -40,7 +40,7 @@ Build the application from the full design, checked part by part against the ini
 | 12 | `llm.py`: chat model factory and structured output with a JSON fallback | Stand-in model; messy JSON parsed |
 | 13 | `research.py`: ReAct loop with LangChain tools; agent sees headers and cleaned extracts only; reflection notes in the prompt | Scripted model: step limit, repeated queries, empty results; planted instruction text never reaches the agent |
 | 14 | `mcp_servers/`: case memory, document index, branch log | In-memory MCP client calls each tool |
-| 15 | `tot.py`: beam search synthesis | Beam of 3; all-"no effect" ledger kept; grounding and date failures pruned; 0.3 rule; ties to smaller shift; 25-call budget; baseline if nothing survives |
+| 15 | `tot.py`: beam search synthesis; every node serialised as a JSON record (id, parent, readings, scores) in the branch log | Node records round-trip through the branch log; beam of 3; all-"no effect" ledger kept; grounding and date failures pruned; 0.3 rule; ties to smaller shift; 25-call budget; baseline if nothing survives |
 | 16 | `critic.py` and `reflection.py`: final checks, entailment check, notes | Each rejection rule; notes written and read back |
 | 17 | `pipeline.py` and `crew.py`: run_forecast with retries and baseline fallback; run record with model version and seed; CrewAI roles | Fakes end to end; leakage audit clean; CrewAI test skips if not installed |
 
@@ -48,7 +48,7 @@ Build the application from the full design, checked part by part against the ini
 
 | # | Commit | Tests |
 | --- | --- | --- |
-| 18 | `evaluate.py`: baselines (normal prior, price-only, prompt-only, no retrieval, no ToT) and ablations; `forward_log.py` with hashes | Each baseline runs on fakes; edited record fails the hash |
+| 18 | `evaluate.py`: baselines (normal prior, price-only, prompt-only, no retrieval, no ToT) and ablations, including a sweep over the ToT settings the class lesson names (beam width, pruning margin, depth limit); `forward_log.py` with hashes | Each baseline runs on fakes; edited record fails the hash |
 | 19 | Streamlit app: forecast, ledger, tree, trace, audit; interactive mode (strike, resize, add lines, plain-language assumptions); implied probabilities shown only after the forecast | UI helpers; AppTest smoke test when installed |
 | 20 | README: setup, API keys, Colab, building the index, running tests | — |
 
