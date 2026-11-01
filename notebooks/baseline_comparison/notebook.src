@@ -54,8 +54,15 @@ CALM_MIN_WINDOWS = 50               # fewer past windows than this: no adjustmen
 FIXED_GUESS = {"fall": 30.85, "flat": 38.3, "gain": 30.85}
 N_BOOT = 1000
 
+# Optional: the prompt-only baseline (needs a GPU or an API model; about 30-45 minutes on a T4)
+RUN_PROMPT_ONLY = False
+PROMPT_ONLY_START = "2025-01-06"    # after the model's training data ends, so it cannot remember outcomes
+PROMPT_ONLY_EVERY_WEEKS = 2         # every second Monday: about 1,200 forecasts
+LLM_BACKEND = "hf"                  # "hf", "openai" or "anthropic"
+LLM_MODEL = "Qwen/Qwen2.5-3B-Instruct"
+
 #%% core
-import math
+import json, math, re
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta, timezone
@@ -63,6 +70,7 @@ from scipy.stats import norm
 
 OUTCOMES = ("fall", "flat", "gain")
 VERSIONS = ("A", "B", "C", "D", "Fixed guess")
+EXTRA_VERSIONS = ("Prompt only", "Prompt-only average")
 
 #%% md
 ## 2. Data: results dates and prices
@@ -92,8 +100,9 @@ def results_times(cik):
                 out.append(datetime.fromisoformat(acc.replace("Z", "+00:00")).astimezone(timezone.utc))
     return sorted(out)
 
-cik_map = {v["ticker"].upper(): int(v["cik_str"])
-           for v in sec_get("https://www.sec.gov/files/company_tickers.json").json().values()}
+company_list = sec_get("https://www.sec.gov/files/company_tickers.json").json().values()
+cik_map = {v["ticker"].upper(): int(v["cik_str"]) for v in company_list}
+NAMES = {v["ticker"].upper(): v["title"] for v in company_list}
 RESULTS = {t: results_times(cik_map[t]) for t in TICKERS}
 for t in TICKERS:
     print(f"{t}: {len(RESULTS[t])} results filings since {RESULTS[t][0].date() if RESULTS[t] else '-'}")
@@ -338,7 +347,7 @@ def compare_versions(df, reference="Fixed guess", metric="brier", n_boot=None, s
     groups = {w: g.index.to_numpy() for w, g in wide.groupby("week")}
     rng = np.random.default_rng(seed)
     rows = []
-    for v in VERSIONS:
+    for v in list(VERSIONS) + [c for c in wide.columns if c in EXTRA_VERSIONS]:
         if v not in wide:
             continue
         d = (wide[v] - wide[reference]).to_numpy()
@@ -427,3 +436,110 @@ Fill in after the run:
 4. **The decision for question 2b:** the best version here is the one to carry into the application. GARCH can be added as a further row if C and D leave a gap.
 
 **Next, with the FirstRate option data:** the same forecasts can be scored against the option-implied probabilities (the main metric), and the correction ratio of question 2a measured on 2020–2024.
+
+
+#%% md
+## 9. Optional: the prompt-only baseline
+
+The prompt-only baseline asks the language model for the three probabilities from the company name and the date alone, as in the Tree of Thought notebook. It did surprisingly well there, so it is tested here on a larger, fair sample:
+
+- **Only dates from 2025**, after the model's training data ends, so it cannot remember how the stock did.
+- **Every second Monday for all 30 stocks**, about 1,200 forecasts. Every other version is scored on the same forecasts.
+- **A check on what the model really adds.** "Prompt-only average" uses the model's average answer as a fixed guess. If it scores as well as the real prompt-only answers, the model is not adapting to each stock and date, it is just giving a sensible constant. (The average is taken over the same forecasts, which gives this row a small head start.)
+
+Set `RUN_PROMPT_ONLY = True` in the settings and use a GPU runtime to run this section.
+
+#%% core
+PROMPT_ONLY_SYSTEM = """You forecast a stock's return over the next 21 trading days.
+Give the probability (in percent) of a large fall, a roughly flat month and a large gain,
+where large means more than half of the stock's typical monthly move over the past year.
+Reply with ONLY a JSON object: {"fall": number, "flat": number, "gain": number}"""
+
+def parse_probs(reply):
+    m = re.search(r"\{.*?\}", re.sub(r"```(?:json)?", "", reply), re.S)
+    try:
+        d = json.loads(m.group(0)) if m else {}
+        p = {k: max(float(d[k]), 0.0) for k in OUTCOMES}
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
+    s = sum(p.values())
+    return {k: 100 * v / s for k, v in p.items()} if s > 0 else None
+
+def prompt_only_rows(stocks, dates, chat_fn, names):
+    """One prompt-only forecast per stock and date; unreadable replies fall back to the fixed guess."""
+    rows, unreadable = [], 0
+    for s in stocks:
+        for as_of in dates:
+            i = s.position(as_of)
+            if not s.can_forecast(i):
+                continue
+            reply = chat_fn([{"role": "system", "content": PROMPT_ONLY_SYSTEM},
+                             {"role": "user", "content": f"Company: {names.get(s.ticker, s.ticker)} ({s.ticker}). "
+                                                         f"Forecast date: {as_of.date()}."}], 60)
+            p = parse_probs(reply)
+            if p is None:
+                unreadable += 1
+                p = dict(FIXED_GUESS)
+            outcome, k = s.realised_bucket(i), s.days_since_results(i)
+            rows.append({"ticker": s.ticker, "as_of": as_of, "week": pd.Timestamp(as_of.date()).to_period("W"),
+                         "days since results": k, "phase": phase_label(k), "outcome": outcome,
+                         "version": "Prompt only", **p, "brier": brier(p, outcome), "log loss": log_loss(p, outcome)})
+    return pd.DataFrame(rows), unreadable
+
+def with_prompt_only(bt, po):
+    """The backtest restricted to the prompt-only forecasts, plus the prompt-only and its-average rows."""
+    keys = po[["ticker", "as_of"]]
+    same = bt.merge(keys, on=["ticker", "as_of"])
+    avg = {k: float(po[k].mean()) for k in OUTCOMES}
+    avg_rows = po.copy()
+    avg_rows["version"] = "Prompt-only average"
+    for k in OUTCOMES:
+        avg_rows[k] = avg[k]
+    avg_rows["brier"] = [brier(avg, o) for o in avg_rows["outcome"]]
+    avg_rows["log loss"] = [log_loss(avg, o) for o in avg_rows["outcome"]]
+    return pd.concat([same, po, avg_rows], ignore_index=True), avg
+
+#%% code
+if RUN_PROMPT_ONLY:
+    def make_chat(backend, model_name):
+        if backend == "hf":
+            import torch
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            tok = AutoTokenizer.from_pretrained(model_name)
+            lm = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
+            def chat(messages, max_tokens):
+                prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                inputs = tok(prompt, return_tensors="pt").to(lm.device)
+                out = lm.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
+                return tok.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+            return chat
+        if backend == "openai":
+            from openai import OpenAI
+            client = OpenAI()
+            def chat(messages, max_tokens):
+                r = client.chat.completions.create(model=model_name, messages=messages, max_tokens=max_tokens, temperature=0)
+                return r.choices[0].message.content.strip()
+            return chat
+        if backend == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic()
+            def chat(messages, max_tokens):
+                system = "\n".join(m["content"] for m in messages if m["role"] == "system")
+                rest = [m for m in messages if m["role"] != "system"]
+                r = client.messages.create(model=model_name, system=system, messages=rest, max_tokens=max_tokens, temperature=0)
+                return r.content[0].text.strip()
+            return chat
+        raise ValueError(backend)
+
+    CHAT = make_chat(LLM_BACKEND, LLM_MODEL)
+    po_dates = weekly_dates(PROMPT_ONLY_START, TEST_END)[::PROMPT_ONLY_EVERY_WEEKS]
+    PO, unreadable = prompt_only_rows(STOCKS, po_dates, CHAT, NAMES)
+    print(f"{len(PO)} prompt-only forecasts, {unreadable} unreadable replies (fixed guess used)")
+    BT_PO, PO_AVG = with_prompt_only(BT, PO)
+    print("Prompt-only average answer:", {k: round(v, 1) for k, v in PO_AVG.items()})
+    print("How much its answers vary (std of each probability):", PO[list(OUTCOMES)].std().round(1).to_dict())
+    display(compare_versions(BT_PO, metric="brier"))
+    display(compare_versions(BT_PO, metric="log loss"))
+    display(calibration(BT_PO))
+else:
+    print("Skipped: set RUN_PROMPT_ONLY = True to run this section.")
