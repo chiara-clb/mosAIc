@@ -597,3 +597,147 @@ EVENTS = {t: [(event_key(r["form"], r.get("items", "")), parse_accepted(r["accep
 CASE = CaseMemory(EVENTS, {t: PRICES[t] for t in CASE_TICKERS})
 print("Event types with the most history:")
 print(pd.Series([k for evs in EVENTS.values() for k, _ in evs]).value_counts().head(12))
+
+#%% md
+## 10. The language model
+
+One small wrapper, so the backend can be switched in the settings: a local Hugging Face model (Qwen2.5-3B by default, free on a Colab T4), or an API model. Decoding is greedy (temperature 0), so the same input always gives the same output. The lab sampled at temperature 0.7; here reproducible runs matter more.
+
+The class lab found that the generator model is the bottleneck: the paper's ToT solved 74% of Game of 24 puzzles with GPT-4 and 19% with GPT-3.5. Expect weaker readings from a 3B model than from a 7B or API model.
+
+#%% core
+class Model:
+    """Counts every call, so the 25-call budget per forecast can be checked."""
+
+    def __init__(self, chat_fn):
+        self.chat_fn, self.calls = chat_fn, 0
+
+    def __call__(self, messages, max_tokens=300):
+        self.calls += 1
+        return self.chat_fn(messages, max_tokens)
+
+def parse_json(reply, kind="["):
+    """First JSON list ("[") or object ("{") in a reply, tolerating code fences and extra text."""
+    reply = re.sub(r"```(?:json)?", "", reply)
+    pattern = r"\[.*\]" if kind == "[" else r"\{.*\}"
+    m = re.search(pattern, reply, re.S)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return None
+
+#%% code
+def make_chat(backend, model_name):
+    if backend == "hf":
+        import torch
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        tok = AutoTokenizer.from_pretrained(model_name)
+        lm = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
+
+        def chat(messages, max_tokens):
+            prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = tok(prompt, return_tensors="pt").to(lm.device)
+            out = lm.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
+            return tok.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+        return chat
+
+    if backend == "openai":                      # needs OPENAI_API_KEY in the environment
+        from openai import OpenAI
+        client = OpenAI()
+
+        def chat(messages, max_tokens):
+            r = client.chat.completions.create(model=model_name, messages=messages,
+                                               max_tokens=max_tokens, temperature=0)
+            return r.choices[0].message.content.strip()
+        return chat
+
+    if backend == "anthropic":                   # needs ANTHROPIC_API_KEY in the environment
+        import anthropic
+        client = anthropic.Anthropic()
+
+        def chat(messages, max_tokens):
+            system = "\n".join(m["content"] for m in messages if m["role"] == "system")
+            rest = [m for m in messages if m["role"] != "system"]
+            r = client.messages.create(model=model_name, system=system, messages=rest,
+                                       max_tokens=max_tokens, temperature=0)
+            return r.content[0].text.strip()
+        return chat
+
+    raise ValueError(f"unknown backend {backend!r}")
+
+CHAT = make_chat(LLM_BACKEND, LLM_MODEL)
+print("Model ready:", LLM_BACKEND, LLM_MODEL)
+
+#%% md
+## 11. Thought generator: proposing readings
+
+The **propose** strategy from the paper: one call per evidence item returns the two most plausible readings, most plausible first. Code then adds "no effect" if the model did not include it, so every item has a neutral reading and the all-"no effect" ledger (the baseline) always exists.
+
+The model only proposes the effect, the size and a reason. It never writes numbers: the shifts come from the table in section 7.
+
+#%% core
+GEN_SYSTEM = """You help forecast a stock's move over the next month (21 trading days).
+You are shown ONE passage from the company's SEC filings, published before the forecast date.
+Give the TWO most plausible readings of how this passage affects the stock over the next month, most plausible first.
+Each reading has:
+- "effect": "fall" (points to a large fall), "gain" (points to a large gain),
+  "spread" (makes a large move in EITHER direction more likely, e.g. an uncertain lawsuit or a big product launch),
+  or "none" (routine wording, already known, or already in the price)
+- "size": "small", "medium" or "large"
+- "reason": one sentence that quotes or closely paraphrases the passage
+The two readings must have different effects.
+Reply with ONLY a JSON list of two objects."""
+
+NO_EFFECT_REASON = "Routine or already reflected in the price; no change to the outlook."
+
+def item_message(item, as_of):
+    days = (as_of.date() - datetime.fromisoformat(item["accepted"]).date()).days
+    return (f"Company: {item['company']} ({item['ticker']}). Forecast date: {as_of.date()}.\n"
+            f"{item['form']} | {item['section']} | filed {item['accepted'][:10]} ({days} days before the forecast date)\n\n"
+            f"{item['text']}")
+
+def propose_readings(model, item, as_of):
+    """Up to 3 readings: the model's (most plausible first), plus 'no effect' if missing."""
+    reply = model([{"role": "system", "content": GEN_SYSTEM},
+                   {"role": "user", "content": item_message(item, as_of)}], max_tokens=300)
+    data = parse_json(reply, "[") or []
+    readings, seen = [], set()
+    for d in data if isinstance(data, list) else []:
+        if not isinstance(d, dict):
+            continue
+        effect = str(d.get("effect", "")).lower().strip()
+        size = str(d.get("size", "")).lower().strip()
+        if effect not in EFFECTS or effect in seen or (effect != "none" and size not in STRENGTH_POINTS):
+            continue
+        seen.add(effect)
+        readings.append({"effect": effect, "size": size if effect != "none" else "small",
+                         "reason": str(d.get("reason", ""))[:300], "source": item["id"]})
+        if len(readings) == 2:
+            break
+    if "none" not in seen:
+        readings.append({"effect": "none", "size": "small", "reason": NO_EFFECT_REASON, "source": item["id"]})
+    return readings, reply
+
+#%% md
+## 12. Grounding check
+
+The first scoring check is pass/fail: does the passage actually say what the reading claims? This is the only check that needs the model, and it is skipped for "no effect", which claims nothing. A reading that fails is pruned at once.
+
+#%% core
+GROUND_SYSTEM = """You check whether a claim is supported by a passage from an SEC filing.
+Answer "yes" only if the passage states or directly implies the claim. Otherwise answer "no".
+Reply with one word: yes or no."""
+
+def grounded(model, item, reading):
+    if reading["effect"] == "none":
+        return True, None
+    reply = model([{"role": "system", "content": GROUND_SYSTEM},
+                   {"role": "user", "content": f"Passage:\n{item['text']}\n\nClaim: {reading['reason']}"}], max_tokens=5)
+    word = re.findall(r"[a-z]+", reply.lower())
+    return (bool(word) and word[0] == "yes"), reply
+
+def date_ok(item, as_of):
+    acc = datetime.fromisoformat(item["accepted"])
+    return as_of - timedelta(days=FRESH_DAYS) <= acc < as_of
