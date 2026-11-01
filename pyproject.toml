@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mosaic"
+version = "0.1.0"
+description = "MosAIc: forecasts one-month stock moves from public filings, prices and news, with every adjustment cited."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.0",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pydantic>=2.5",
+]
+
+[project.optional-dependencies]
+# Embeddings for document search (all-MiniLM-L6-v2)
+retrieval = ["sentence-transformers>=3.0"]
+# Daily prices
+prices = ["yfinance>=0.2.40"]
+# LLM through LangChain, API models (default)
+llm = ["langchain-core>=0.3", "langchain-anthropic>=0.3", "langchain-openai>=0.3"]
+# Local Hugging Face model, e.g. Qwen2.5-3B on Colab
+local = ["langchain-huggingface>=0.1", "transformers>=4.44", "accelerate>=0.33", "torch>=2.3"]
+# Agent roles and shared state (Checkpoint 4)
+frameworks = ["crewai>=0.80", "mcp>=2.0"]
+# Interface
+ui = ["streamlit>=1.38"]
+dev = ["pytest>=8.0"]
+all = ["mosaic[retrieval,prices,llm,frameworks,ui,dev]"]
+
+[tool.setuptools.packages.find]
+include = ["mosaic*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "needs_langchain: needs LangChain installed",
+    "needs_crewai: needs CrewAI installed",
+    "needs_streamlit: needs Streamlit installed",
+    "network: needs internet access (SEC EDGAR, prices, model APIs)",
+]
