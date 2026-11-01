@@ -104,3 +104,324 @@ from scipy.stats import norm
 
 OUTCOMES = ("fall", "flat", "gain")
 EFFECTS = ("fall", "gain", "spread", "none")
+
+#%% md
+## 3. Filings from SEC EDGAR
+
+Reused from Checkpoint 3, with two changes:
+
+- **Full filing history.** EDGAR lists only about a year of recent filings in one file and the rest in extra pages. Case memory needs years of 8-Ks, so all pages are read. Only the list of filings is needed for case memory, not the documents, so this is quick even for 30 stocks.
+- **Download by date.** The documents for the forecast stocks are downloaded for the whole test window, plus 200 days before it, so each filing's previous filing is available for the novelty check.
+
+#%% code
+import requests
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
+import warnings
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
+HEADERS = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"}
+
+def sec_get(url):
+    time.sleep(0.15)  # well under the SEC's limit of 10 requests per second
+    r = requests.get(url, headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    return r
+
+def ticker_to_cik():
+    data = sec_get("https://www.sec.gov/files/company_tickers.json").json()
+    return {v["ticker"].upper(): int(v["cik_str"]) for v in data.values()}
+
+KEYS = ["form", "filingDate", "acceptanceDateTime", "accessionNumber", "primaryDocument", "items"]
+
+def _rows(block):
+    n = len(block["form"])
+    return [{k: block.get(k, [""] * n)[i] for k in KEYS} for i in range(n)]
+
+def list_filings(cik):
+    """All filings of one company, including the older pages EDGAR keeps in separate files."""
+    sub = sec_get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json").json()
+    rows = _rows(sub["filings"]["recent"])
+    for page in sub["filings"].get("files", []):
+        rows += _rows(sec_get(f"https://data.sec.gov/submissions/{page['name']}").json())
+    return sub.get("name", ""), rows
+
+def filing_base(cik, accession):
+    return f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession.replace('-', '')}"
+
+def exhibit_urls(cik, accession):
+    idx = sec_get(filing_base(cik, accession) + "/index.json").json()
+    names = [it["name"] for it in idx["directory"]["item"]]
+    return [filing_base(cik, accession) + "/" + n for n in names
+            if re.search(r"ex-?99", n, re.I) and n.lower().endswith((".htm", ".html", ".txt"))]
+
+#%% core
+def parse_accepted(s):
+    # e.g. "2024-08-01T16:30:42.000Z" -> timezone-aware UTC datetime
+    return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+def html_to_text(html):
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "lxml")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    for tag in soup.find_all(lambda t: t.name and t.name.lower() == "ix:header"):
+        tag.decompose()  # hidden XBRL data in modern filings
+    text = soup.get_text("\n")
+    text = re.sub(r"[ \t\xa0]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text)
+    return text.strip()
+
+ITEM_RE = re.compile(r"\n\s*(item\s+\d+[a-z]?\.?)\s*([^\n]{0,80})", re.I)
+
+def split_sections(text, label):
+    if label == "Press release":
+        return [("Press release", text)]
+    text = "\n" + text
+    matches = list(ITEM_RE.finditer(text))
+    if not matches:
+        return [("Full text", text.strip())]
+    out = []
+    for j, m in enumerate(matches):
+        end = matches[j + 1].start() if j + 1 < len(matches) else len(text)
+        body = text[m.start():end]
+        if len(body.split()) > 40:              # skips table-of-contents entries
+            title = re.sub(r"\s+", " ", (m.group(1) + " " + m.group(2)).strip())[:80]
+            out.append((title, body))
+    return out or [("Full text", text.strip())]
+
+def section_key(section):
+    """'Item 1A. Risk Factors' -> 'item 1a', so the same section can be found in the previous filing."""
+    m = re.match(r"item\s+(\d+[a-z]?)", section.strip(), re.I)
+    return f"item {m.group(1).lower()}" if m else section.strip().lower()
+
+def chunk_words(text, size=None, overlap=None):
+    size = size or CHUNK_WORDS
+    overlap = OVERLAP_WORDS if overlap is None else overlap
+    words, step, out = text.split(), size - overlap, []
+    for i in range(0, max(len(words) - overlap, 1), step):
+        piece = words[i:i + size]
+        if len(piece) >= 30:
+            out.append(" ".join(piece))
+    return out
+
+def event_key(form, items):
+    """Event type used by case memory: the 8-K item number, or the report type."""
+    if form != "8-K":
+        return form
+    codes = [c.strip() for c in str(items).split(",") if c.strip()]
+    codes = [c for c in codes if c not in ("9.01",)]          # 9.01 = exhibits only, never the news
+    return "8-K " + (codes[0] if codes else "other")
+
+#%% code
+CIK = ticker_to_cik()
+FILINGS, NAMES = {}, {}
+for t in sorted(set(CASE_TICKERS) | set(TICKERS)):
+    NAMES[t], rows = list_filings(CIK[t])
+    FILINGS[t] = [r for r in rows if r["form"] in FORMS]
+    print(f"{t}: {len(FILINGS[t])} filings back to {min(r['filingDate'] for r in FILINGS[t])}")
+
+def build_corpus(tickers, since, until):
+    corpus = []
+    for t in tickers:
+        cik = CIK[t]
+        for r in FILINGS[t]:
+            accepted = parse_accepted(r["acceptanceDateTime"])
+            if not (since <= accepted < until):
+                continue
+            docs = [(filing_base(cik, r["accessionNumber"]) + "/" + r["primaryDocument"], "Main document")]
+            if r["form"] == "8-K":
+                docs += [(u, "Press release") for u in exhibit_urls(cik, r["accessionNumber"])]
+            for url, label in docs:
+                try:
+                    text = html_to_text(sec_get(url).text)
+                except Exception as e:
+                    print("  skipped", url, e)
+                    continue
+                for section, body in split_sections(text, label):
+                    for piece in chunk_words(body):
+                        corpus.append({
+                            "id": f"{t}-{r['form']}-{r['filingDate']}-{len(corpus)}",
+                            "ticker": t, "company": NAMES[t], "form": r["form"], "section": section,
+                            "section_key": section_key(section), "event": event_key(r["form"], r.get("items", "")),
+                            "accepted": accepted.isoformat(), "filing": r["accessionNumber"], "url": url, "text": piece,
+                            "header": f"{NAMES[t]} | {r['form']} | {section} | {accepted.date()}",
+                        })
+        print(f"{t}: {sum(c['ticker'] == t for c in corpus)} chunks")
+    return corpus
+
+WINDOW_START = datetime.fromisoformat(START_DATE).replace(tzinfo=timezone.utc) - timedelta(days=200)
+WINDOW_END = datetime.fromisoformat(END_DATE).replace(tzinfo=timezone.utc) + timedelta(days=1)
+corpus = build_corpus(TICKERS, WINDOW_START, WINDOW_END)
+json.dump(corpus, open("corpus.json", "w"))
+print("Total chunks:", len(corpus))
+
+#%% md
+## 4. Index and search
+
+Same as Checkpoint 3: each chunk is embedded as `header [SEP] text`, search keeps only chunks for the stock from the 30 days before the forecast date, takes the 20 closest and reranks them to 5 with MMR (λ = 0.7). The MMR function now takes the relevance scores directly, so the same code can be reused for evidence selection below.
+
+#%% core
+@dataclass
+class Index:
+    chunks: list
+    emb: np.ndarray                 # one normalised row per chunk, so a dot product is cosine similarity
+    accepted: list = field(default_factory=list)
+    tickers: np.ndarray = None
+
+    def __post_init__(self):
+        self.accepted = [datetime.fromisoformat(c["accepted"]) for c in self.chunks]
+        self.tickers = np.array([c["ticker"] for c in self.chunks])
+
+def mmr_select(rel, cand_emb, k, lam):
+    """Maximal Marginal Relevance: pick k items that are relevant (rel) but not near-copies."""
+    rel = np.asarray(rel, dtype=float)
+    selected, remaining = [], list(range(len(rel)))
+    while remaining and len(selected) < k:
+        if not selected:
+            best = max(remaining, key=lambda i: rel[i])
+        else:
+            sims = cand_emb[remaining] @ cand_emb[selected].T
+            scores = lam * rel[remaining] - (1 - lam) * sims.max(axis=1)
+            best = remaining[int(np.argmax(scores))]
+        selected.append(best)
+        remaining.remove(best)
+    return selected
+
+def search_index(index, qvec, ticker, before, since=None):
+    rows = np.array([i for i in range(len(index.chunks))
+                     if index.tickers[i] == ticker and index.accepted[i] < before
+                     and (since is None or index.accepted[i] >= since)], dtype=int)
+    if len(rows) == 0:
+        return {"status": "no documents in this date range", "results": []}
+    sims = index.emb[rows] @ qvec
+    order = rows[np.argsort(-sims)[:K_CANDIDATES]]
+    best = float(index.emb[order[0]] @ qvec)
+    if best < MIN_SCORE:
+        return {"status": f"nothing relevant found (best score {best:.2f})", "results": []}
+    rel = index.emb[order] @ qvec
+    picked = mmr_select(rel, index.emb[order], K_FINAL, MMR_LAMBDA)
+    return {"status": "ok", "results": [{**index.chunks[order[j]], "row": int(order[j]),
+                                         "score": round(float(rel[j]), 3)} for j in picked]}
+
+#%% code
+from sentence_transformers import SentenceTransformer
+embedder = SentenceTransformer(EMBED_MODEL)
+emb = embedder.encode([c["header"] + " [SEP] " + c["text"] for c in corpus],
+                      batch_size=64, normalize_embeddings=True, show_progress_bar=True)
+INDEX = Index(corpus, np.asarray(emb, dtype=np.float32))
+print("Index:", INDEX.emb.shape)
+
+def embed_query(text):
+    return embedder.encode([text], normalize_embeddings=True)[0]
+
+#%% md
+## 5. Choosing the five evidence items (new)
+
+The research step runs three searches, each returning up to 5 passages, but ToT reads at most 5 items, one tree level each. The design decision (Checkpoint 4, section 2):
+
+1. **Pool** the passages from all searches. A passage found by several searches keeps its best score.
+2. **One passage per filing**, the best one, since the critic counts each filing once anyway.
+3. **MMR to 5** on what is left, with relevance = the best score, so the five do not repeat each other.
+
+The five are then ordered newest first, which is the order the tree reads them in.
+
+#%% core
+def select_evidence(index, results_by_query, k=None, lam=None):
+    k = k or min(K_FINAL, MAX_DEPTH)
+    lam = MMR_LAMBDA if lam is None else lam
+    pooled = {}
+    for res in results_by_query:
+        for r in res["results"]:
+            if r["id"] not in pooled or r["score"] > pooled[r["id"]]["score"]:
+                pooled[r["id"]] = r
+    per_filing = {}
+    for r in pooled.values():
+        key = (r["ticker"], r["filing"])
+        if key not in per_filing or r["score"] > per_filing[key]["score"]:
+            per_filing[key] = r
+    cands = sorted(per_filing.values(), key=lambda r: -r["score"])
+    if not cands:
+        return []
+    rows = [r["row"] for r in cands]
+    picked = mmr_select([r["score"] for r in cands], index.emb[rows], k, lam)
+    chosen = [cands[j] for j in picked]
+    return sorted(chosen, key=lambda r: (r["accepted"], r["score"]), reverse=True)
+
+#%% md
+## 6. Prices, buckets and the baseline
+
+Reused from Checkpoint 3. The forecast date means the start of that day, so only closes on earlier days are known. A "large" move is more than half of the stock's typical monthly move over the past year (σ, one year of daily log returns scaled to 21 days). The baseline uses recent volatility, plus the typical earnings-day jump when the next results are likely within the month.
+
+#%% core
+def prices_before(px, as_of):
+    return px[np.array([d < as_of.date() for d in px.index.date])].dropna()
+
+def thresholds(px, as_of):
+    past = prices_before(px, as_of)
+    r = np.diff(np.log(past.to_numpy(dtype=float)))[-SIGMA_LOOKBACK:]
+    if len(r) < SIGMA_LOOKBACK // 2:
+        raise ValueError(f"not enough price history before {as_of.date()}")
+    sigma = float(r.std() * math.sqrt(HORIZON))
+    return {"sigma": sigma, "lower": -BUCKET_K * sigma, "upper": BUCKET_K * sigma, "start_price": float(past.iloc[-1])}
+
+def realised_return(px, as_of):
+    past = prices_before(px, as_of)
+    after = px[np.array([d >= as_of.date() for d in px.index.date])].dropna()
+    if past.empty or len(after) < HORIZON:
+        return None
+    return float(math.log(after.iloc[HORIZON - 1] / past.iloc[-1]))
+
+def bucket_of(ret, th):
+    return "fall" if ret < th["lower"] else "gain" if ret > th["upper"] else "flat"
+
+def realised_bucket(px, as_of):
+    ret = realised_return(px, as_of)
+    return None if ret is None else bucket_of(ret, thresholds(px, as_of))
+
+def typical_earnings_move(px, dates):
+    moves = []
+    for d in dates[-4:]:
+        before_px = px[px.index.date <= d.date()]
+        after_px = px[px.index.date > d.date()]
+        if len(before_px) and len(after_px):
+            moves.append(abs(math.log(after_px.iloc[0] / before_px.iloc[-1])))
+    return float(np.mean(moves)) if moves else None
+
+def baseline_probabilities(px, as_of, results_dates):
+    """Fall / flat / gain in percent, from prices and the earnings calendar only."""
+    info = {}
+    try:
+        past = prices_before(px, as_of)
+        r = np.diff(np.log(past.to_numpy(dtype=float)))[-SIGMA_LOOKBACK:]
+        th = thresholds(px, as_of)
+        w = 0.94 ** np.arange(len(r))[::-1]                       # recent days weigh more
+        var_month = float(np.sum(w * r ** 2) / np.sum(w)) * HORIZON
+        past_results = sorted(d for d in results_dates if d < as_of)
+        if past_results and as_of < past_results[-1] + timedelta(days=91) <= as_of + timedelta(days=30):
+            move = typical_earnings_move(px, past_results)
+            if move:
+                var_month += move ** 2
+                info["earnings_move"] = round(move, 4)
+        info["earnings_in_window"] = "earnings_move" in info
+        s = math.sqrt(var_month)
+        fall, gain = norm.cdf(th["lower"] / s), 1 - norm.cdf(th["upper"] / s)
+        probs = {"fall": fall, "flat": 1 - fall - gain, "gain": gain}
+        info.update({"sigma_year": round(th["sigma"], 4), "sigma_month": round(s, 4)})
+    except Exception as e:
+        probs = {"fall": 0.3085, "flat": 0.383, "gain": 0.3085}
+        info["fallback"] = str(e)
+    return {k: round(100 * float(v), 2) for k, v in probs.items()}, info
+
+def results_dates(filings):
+    """Acceptance times of earnings-results 8-Ks (item 2.02)."""
+    return sorted(parse_accepted(r["acceptanceDateTime"]) for r in filings
+                  if r["form"] == "8-K" and "2.02" in str(r.get("items", "")))
+
+#%% code
+import yfinance as yf
+
+PRICES = {}
+for t in sorted(set(CASE_TICKERS) | set(TICKERS)):
+    px = yf.download(t, start="2012-01-01", progress=False, auto_adjust=True)["Close"]
+    PRICES[t] = px.squeeze().dropna()
+    print(f"{t}: {len(PRICES[t])} days from {PRICES[t].index[0].date()}")

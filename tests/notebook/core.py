@@ -18,7 +18,10 @@ def load_core(**overrides) -> dict:
 
     `overrides` are injected after the settings cell runs, e.g. load_core(BEAM_WIDTH=1).
     """
-    ns: dict = {"__name__": "tot_core"}
+    import types
+    mod = types.ModuleType("tot_core")
+    sys.modules["tot_core"] = mod          # dataclasses look up their module here
+    ns = mod.__dict__
     first = True
     for kind, src in parse_cells(SRC.read_text()):
         if kind != "core":
