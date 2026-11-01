@@ -82,6 +82,8 @@ MAX_MODEL_CALLS = 25
 KEEP_NO_EFFECT_NODE = True        # the all-"no effect" ledger (the baseline) is always kept
 WEIGHTS = {"base_rate": 0.4, "novelty": 0.4, "consistency": 0.2}   # defaults; tuning needs option data
 SAME_STORY_SIMILARITY = 0.85      # two passages this similar describe the same story
+NOVELTY_SIM_RANGE = (0.5, 0.95)   # similarity to the previous filing: <= 0.5 fully new, >= 0.95 fully repeated
+                                  # (a starting guess: check the diagnostic in section 9 on the first run)
 
 # Case memory
 PRIOR_STRENGTH = 20       # pseudo-events pulling small samples toward the overall frequencies
@@ -562,7 +564,9 @@ class CaseMemory:
 #%% md
 ## 9. Novelty
 
-Companies repeat the same wording every quarter. A passage is compared with the same section of the company's previous filing of the same kind (the previous 10-Q or 10-K for a report section, the previous 8-K with the same item for an 8-K). Novelty is 1 minus the highest similarity to any chunk there. Wording repeated almost word for word scores near 0. When there is no previous filing in the index, the passage counts as new and this is flagged.
+Companies repeat the same wording every quarter. A passage is compared with the same section of the company's previous filing of the same kind (the previous 10-Q or 10-K for a report section, the previous 8-K with the same item for an 8-K), and its highest similarity to any chunk there is turned into a novelty score from 0 to 1. When there is no previous filing in the index, the passage counts as new and this is flagged.
+
+**Why the similarity is rescaled.** Passages from the same company and section are always fairly similar in embedding space, even when the content is new. Using 1 minus similarity directly would make almost everything look repeated, and "no effect" would win nearly every time. So similarity of 0.5 or less counts as fully new, 0.95 or more as fully repeated, with a straight line in between. These two cut-offs are a starting guess; the diagnostic cell after the run shows the real values.
 
 For the readings: a reading that claims an effect gets the novelty score, and "no effect" gets 1 minus it. Repeated wording therefore favours "no effect".
 
@@ -586,7 +590,8 @@ def novelty(index, item):
     if not rows:
         return 1.0, None
     sim = float(np.max(index.emb[rows] @ index.emb[item["row"]]))
-    return float(min(max(1.0 - sim, 0.0), 1.0)), prev
+    lo, hi = NOVELTY_SIM_RANGE
+    return float(min(max((hi - sim) / (hi - lo), 0.0), 1.0)), prev
 
 def reading_novelty(effect, nov):
     return 1.0 - nov if effect == "none" else nov
@@ -927,3 +932,285 @@ def prompt_only(model, company, ticker, as_of):
         return floor_and_normalise(p), True
     except (KeyError, TypeError, ValueError):
         return {"fall": 30.85, "flat": 38.3, "gain": 30.85}, False
+
+#%% md
+## 16. Running one forecast
+
+For one stock and date: baseline from prices, three fixed searches, evidence selection, item preparation (all model calls), then every variant on the same cached readings. The prompt-only call is counted separately, so the ToT budget covers only ToT. The outcome bucket is looked up last.
+
+#%% core
+def forecast_dates(filings, start, end, days_after=None):
+    days_after = DAYS_AFTER_RESULTS if days_after is None else days_after
+    lo = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+    hi = datetime.fromisoformat(end).replace(tzinfo=timezone.utc)
+    out = []
+    for d in results_dates(filings):
+        as_of = datetime(d.year, d.month, d.day, tzinfo=timezone.utc) + timedelta(days=days_after)
+        if lo <= as_of <= hi:
+            out.append(as_of)
+    return sorted(set(out))
+
+def brier(probs, outcome):
+    return sum((probs[k] / 100 - (1.0 if k == outcome else 0.0)) ** 2 for k in OUTCOMES)
+
+def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, company=None, branch_log=None):
+    company = company or ticker
+    fid = f"{ticker}-{as_of.date()}"
+    t0 = time.time()
+    base, info = baseline_probabilities(px, as_of, results_dates(filings))
+    since = as_of - timedelta(days=FRESH_DAYS)
+    searches = [search_index(index, embed_fn(q), ticker, as_of, since=since) for q in QUERIES]
+    evidence = select_evidence(index, searches)
+    model = Model(chat_fn)
+    p0 = case.overall(as_of)
+    prepared = prepare_items(model, evidence, as_of, case, index, p0)
+    t_prep = time.time() - t0
+
+    def log_to_file(rec):
+        if branch_log:
+            with open(branch_log, "a") as f:
+                f.write(json.dumps({"forecast": fid, **rec}, default=str) + "\n")
+
+    t1 = time.time()
+    tot3 = beam_search(prepared, base, log=log_to_file)
+    t_search = time.time() - t1
+    tot1 = beam_search(prepared, base, beam_width=1, keep_no_effect=False)
+    single = single_pass(prepared, base)
+    every = exhaustive(prepared, base)
+    po_model = Model(chat_fn)
+    po, po_ok = prompt_only(po_model, company, ticker, as_of)
+    outcome = realised_bucket(px, as_of)
+    return {
+        "id": fid, "ticker": ticker, "as_of": as_of, "outcome": outcome, "baseline_info": info,
+        "evidence": [{k: e[k] for k in ("id", "form", "section", "accepted", "score", "text")} for e in evidence],
+        "prepared": prepared, "base": base,
+        "variants": {"baseline": base, "prompt only": po, "single pass": single["final"],
+                     "ToT beam 1": tot1["final"], "ToT beam 3": tot3["final"]},
+        "prompt_only_parsed": po_ok,
+        "tot": tot3, "tot1": tot1, "single": single, "exhaustive": every,
+        "calls_tot": model.calls, "seconds_prepare": round(t_prep, 1), "seconds_search": round(t_search, 3),
+    }
+
+#%% md
+## 17. Results
+
+#%% core
+def results_table(records, n_boot=2000, seed=0):
+    """Mean Brier score per variant, and the paired difference with the baseline (95% interval)."""
+    recs = [r for r in records if r["outcome"]]
+    names = list(recs[0]["variants"])
+    rng = np.random.default_rng(seed)
+    rows = []
+    b0 = np.array([brier(r["variants"]["baseline"], r["outcome"]) for r in recs])
+    for name in names:
+        b = np.array([brier(r["variants"][name], r["outcome"]) for r in recs])
+        d = b - b0
+        boots = [d[rng.integers(0, len(d), len(d))].mean() for _ in range(n_boot)]
+        rows.append({"variant": name, "forecasts": len(b), "mean Brier": round(float(b.mean()), 4),
+                     "vs baseline": round(float(d.mean()), 4),
+                     "95% interval": (round(float(np.quantile(boots, 0.025)), 4), round(float(np.quantile(boots, 0.975)), 4)),
+                     "changed vs baseline": int(sum(r["variants"][name] != r["base"] for r in recs))})
+    return pd.DataFrame(rows).set_index("variant")
+
+def calls_table(records):
+    return pd.DataFrame([{"forecast": r["id"], "items": len(r["prepared"]), "model calls (ToT)": r["calls_tot"],
+                          "seconds (model calls)": r["seconds_prepare"], "seconds (search)": r["seconds_search"],
+                          "nodes": len(r["tot"]["nodes"])} for r in records])
+
+def sweep(records, widths=(1, 3, 5), margins=(0.1, 0.3, None)):
+    """Re-run the search with other settings on the cached readings: no extra model calls."""
+    rows = []
+    recs = [r for r in records if r["outcome"]]
+    for w in widths:
+        for m in margins:
+            briers, changed, nodes = [], 0, []
+            for r in recs:
+                res = beam_search(r["prepared"], r["base"], beam_width=w, prune_margin=m)
+                briers.append(brier(res["final"], r["outcome"]))
+                changed += res["choice"] != r["tot"]["choice"]
+                nodes.append(len(res["nodes"]))
+            rows.append({"beam width": w, "margin": "none" if m is None else m,
+                         "mean Brier": round(float(np.mean(briers)), 4),
+                         "ledgers different from (3, 0.3)": changed, "mean nodes": round(float(np.mean(nodes)), 1)})
+    return pd.DataFrame(rows)
+
+def search_vs_scoring(records):
+    """Search error: the beam missed the ledger the scoring likes best.
+    Scoring error: a ledger the scoring ranked lower turned out closer to the outcome."""
+    rows = []
+    for r in (r for r in records if r["outcome"]):
+        every = r["exhaustive"]
+        chosen = r["tot"]["choice"]
+        best_by_score = every[0]["choice"]
+        chosen_brier = brier(r["tot"]["final"], r["outcome"])
+        best_hindsight = min(every, key=lambda e: brier(e["final"], r["outcome"]))
+        scores = np.array([e["score"] for e in every])
+        briers = np.array([brier(e["final"], r["outcome"]) for e in every])
+        corr = float(pd.Series(scores).corr(pd.Series(-briers), method="spearman")) if len(every) > 2 else float("nan")
+        rows.append({"forecast": r["id"], "ledgers possible": len(every),
+                     "beam found the top-scored ledger": chosen == best_by_score,
+                     "a pruned ledger was closer to the outcome": brier(best_hindsight["final"], r["outcome"]) < chosen_brier - 1e-9,
+                     "score vs accuracy (rank correlation)": round(corr, 2)})
+    return pd.DataFrame(rows)
+
+def print_tree(record, max_depth=None):
+    """Text view of the search tree, like the lab's visualize(): kept, chosen and pruned nodes."""
+    prepared, nodes = record["prepared"], record["tot"]["nodes"]
+    children = {}
+    for n in nodes:
+        children.setdefault(n["parent"], []).append(n)
+    lines = [f"{record['id']}  baseline {record['base']}  outcome: {record['outcome']}"]
+
+    def walk(n, indent):
+        for c in children.get(n["id"], []):
+            if max_depth and c["depth"] > max_depth:
+                continue
+            r = prepared[c["depth"] - 1]["readings"][c["choice"][-1]]
+            mark = {"chosen": "★", "kept": "●"}.get(c["status"], "○")
+            score = "  -  " if c["score"] is None else f"{c['score']:.2f}"
+            why = f"  [{c['why']}]" if c["why"] else ""
+            lines.append(f"{indent}{mark} {r['effect']:<6} {r['size']:<6} score {score}{why}")
+            if c["status"] in ("kept", "chosen"):
+                walk(c, indent + "    ")
+    walk(nodes[0], "  ")
+    for d, e in enumerate(prepared, start=1):
+        lines.append(f"  level {d}: {e['item']['form']} | {e['item']['section']} | filed {e['item']['accepted'][:10]} "
+                     f"| novelty {e['novelty']:.2f}")
+    return "\n".join(lines)
+
+def find_record(records, words):
+    for r in records:
+        for e in r["prepared"]:
+            if words.lower() in (e["item"]["section"] + " " + e["item"]["text"]).lower():
+                return r
+    return None
+
+def leakage_audit(records):
+    problems = []
+    for r in records:
+        for e in r["evidence"]:
+            if datetime.fromisoformat(e["accepted"]) >= r["as_of"]:
+                problems.append((r["id"], e["id"], "evidence on or after the forecast date"))
+    return problems
+
+#%% md
+### Run the forecasts
+
+About 20 forecasts. With Qwen2.5-3B on a T4 expect a few minutes per forecast. The branch log (every node, pruned ones too) is written to `branch_log.jsonl`.
+
+#%% code
+import os
+if os.path.exists(BRANCH_LOG):
+    os.remove(BRANCH_LOG)
+
+RECORDS = []
+for t in TICKERS:
+    for as_of in forecast_dates(FILINGS[t], START_DATE, END_DATE):
+        rec = run_forecast(t, as_of, CHAT, INDEX, CASE, PRICES[t], FILINGS[t], embed_query,
+                           company=NAMES[t], branch_log=BRANCH_LOG)
+        RECORDS.append(rec)
+        print(f"{rec['id']}: {len(rec['prepared'])} items, {rec['calls_tot']} calls, "
+              f"ToT {rec['variants']['ToT beam 3']}  outcome {rec['outcome']}")
+
+def slim(rec):
+    keep = {k: v for k, v in rec.items() if k not in ("prepared", "tot", "tot1", "single", "exhaustive")}
+    keep["ledger"] = [{k: l[k] for k in ("source", "effect", "size", "reason", "score")} for l in rec["tot"]["ledger"]]
+    return keep
+json.dump([slim(r) for r in RECORDS], open("records.json", "w"), default=str, indent=1)
+
+#%% md
+### 1. Does searching over readings help?
+
+Lower Brier is better. "vs baseline" is the average difference from the baseline on the same forecasts (negative = better), with a 95% interval from resampling the forecasts. With about 20 forecasts, expect wide intervals: the direction is the signal to look for, not a proof.
+
+#%% code
+import matplotlib.pyplot as plt
+
+table = results_table(RECORDS)
+display(table)
+ax = table["mean Brier"].plot(kind="bar", rot=0, figsize=(8, 3.5), color="steelblue",
+                              title="Mean Brier score against actual outcomes (lower is better)")
+ax.set_ylabel("Brier score")
+plt.tight_layout(); plt.show()
+print("Prompt-only replies that could be read:", sum(r["prompt_only_parsed"] for r in RECORDS), "of", len(RECORDS))
+
+#%% md
+### 2. The Apple legal-proceedings case
+
+Checkpoint 3's only approved line was "Apple is involved in legal proceedings that could affect its financial condition", standard wording that the reviewer flagged as weak evidence. Here is how the tree handles a legal-proceedings passage. ★ = chosen, ● = kept in the beam, ○ = pruned (with the reason).
+
+#%% code
+case_rec = find_record([r for r in RECORDS if r["ticker"] == "AAPL"], "legal proceedings") or RECORDS[0]
+print(print_tree(case_rec))
+for e in case_rec["prepared"]:
+    print(f"\n[{e['item']['section']}] novelty {e['novelty']:.2f}, previous filing {e['previous_filing']}")
+    for r in e["readings"]:
+        flag = "" if r["ok"] else f"  PRUNED: {r['why']}"
+        print(f"  {r['effect']:<6} {r['size']:<6} base rate {r['base_rate']:.2f} (n={r['n_events']}) "
+              f"novelty {r['novelty']:.2f} -> {r['score']:.2f}{flag}\n      {r['reason'][:140]}")
+
+#%% md
+### 3. Are beam width 3 and the 0.3 margin sensible?
+
+The class lesson stresses that accuracy depends on the search settings as much as on the model. This reruns the search on the cached readings with other settings, so it costs no model calls.
+
+#%% code
+display(sweep(RECORDS))
+
+#%% md
+### 4. Search error or scoring error?
+
+- **Beam found the top-scored ledger:** if this is usually true, beam width 3 is wide enough, and a wider beam would not help.
+- **A pruned ledger was closer to the outcome:** the Checkpoint 4 risk check. Some of this is luck (one month is one draw); if it happens most of the time, the scoring weights need work.
+- **Score vs accuracy:** across all possible ledgers for a forecast, do higher-scored ledgers have lower Brier? Positive is good.
+
+#%% code
+svs = search_vs_scoring(RECORDS)
+display(svs)
+print("Beam found the top-scored ledger:", int(svs["beam found the top-scored ledger"].sum()), "of", len(svs))
+print("A pruned ledger was closer:", int(svs["a pruned ledger was closer to the outcome"].sum()), "of", len(svs))
+print("Average rank correlation:", round(svs["score vs accuracy (rank correlation)"].mean(), 2))
+
+#%% md
+### Diagnostic: novelty and "no effect"
+
+Check the novelty cut-offs (section 9) here. If almost every passage scores near 0 novelty, or ToT keeps the baseline in nearly every forecast, the cut-offs in `NOVELTY_SIM_RANGE` are too strict; if everything scores near 1, too loose.
+
+#%% code
+nov = pd.Series([e["novelty"] for r in RECORDS for e in r["prepared"] if e["previous_filing"]])
+print(nov.describe().round(2))
+nov.plot(kind="hist", bins=20, title="Novelty of evidence passages", figsize=(6, 2.5)); plt.show()
+kept_baseline = sum(not r["tot"]["ledger"] for r in RECORDS)
+print(f"ToT kept the baseline (all 'no effect') in {kept_baseline} of {len(RECORDS)} forecasts")
+
+#%% md
+### 5. Does it fit the budget?
+
+Checkpoint 4 planned about 5 generation calls and up to 15 grounding checks, capped at 25.
+
+#%% code
+ct = calls_table(RECORDS)
+display(ct.describe().loc[["mean", "max"]])
+
+#%% md
+### Leakage audit
+
+Every evidence passage must be dated before its forecast date. Case memory only uses windows that ended before the forecast date by construction (section 8).
+
+#%% code
+problems = leakage_audit(RECORDS)
+print(f"Checked {sum(len(r['evidence']) for r in RECORDS)} evidence passages: {len(problems)} problems")
+assert not problems, problems
+
+#%% md
+## 18. What to take from this
+
+Fill in after the run:
+
+1. **Single pass vs ToT:** did ToT change ledgers, and in which direction did the Brier score move?
+2. **"No effect":** in how many forecasts did ToT keep the baseline? Was the legal-proceedings passage read as "no effect"?
+3. **Settings:** did beam width or margin change the chosen ledgers? If not, beam 3 is wide enough.
+4. **Search vs scoring:** where errors come from tells you whether to change the search or the weights.
+5. **Cost:** calls and seconds per forecast against the Checkpoint 4 budget.
+
+**Limits.** Scored against actual outcomes, not the option-implied answer key; about 20 forecasts; three fixed searches instead of the ReAct loop; default weights; a small open model. The same notebook can be rerun with a 7B or API model by changing `LLM_BACKEND` and `LLM_MODEL`.

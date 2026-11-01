@@ -182,7 +182,7 @@ def test_only_the_latest_earlier_filing_same_section_counts():
     for ch in idx.chunks:
         ch["section_key"] = ns["section_key"](ch["section"])
     nov, p = ns["novelty"](idx, item_at(idx, 4))
-    assert p == "Q1" and nov == pytest.approx(0.4, abs=1e-5)
+    assert p == "Q1" and nov == pytest.approx((0.95 - 0.6) / 0.45, abs=1e-5)     # similarity 0.6
 
 
 def test_8k_compares_with_same_item_only():
@@ -193,7 +193,17 @@ def test_8k_compares_with_same_item_only():
     for ch in idx.chunks:
         ch["section_key"] = ns["section_key"](ch["section"])
     nov, p = ns["novelty"](idx, item_at(idx, 2))
-    assert p == "E1" and nov == pytest.approx(0.2, abs=1e-5)
+    assert p == "E1" and nov == pytest.approx((0.95 - 0.8) / 0.45, abs=1e-5)     # similarity 0.8
+
+
+def test_similarity_is_rescaled_between_the_cut_offs():
+    prev = chunk("p", filing="Q1", accepted="2026-05-01", section="Item 1A. Risk Factors")
+    cur = chunk("c", filing="Q2", accepted="2026-07-31", section="Item 1A. Risk Factors")
+    for sim, expected in ((0.97, 0.0), (0.95, 0.0), (0.725, 0.5), (0.5, 1.0), (0.2, 1.0)):
+        idx = nov_index([prev, cur], [unit(1, 0), unit(sim, (1 - sim ** 2) ** 0.5)])
+        for ch in idx.chunks:
+            ch["section_key"] = ns["section_key"](ch["section"])
+        assert ns["novelty"](idx, item_at(idx, 1))[0] == pytest.approx(expected, abs=1e-5), sim
 
 
 def test_no_previous_filing_counts_as_new():
