@@ -105,3 +105,132 @@ for t in TICKERS:
     px = yf.download(t, start=PRICE_START, progress=False, auto_adjust=True)["Close"]
     PRICES[t] = px.squeeze().dropna()
 print({t: len(p) for t, p in PRICES.items()})
+
+#%% md
+## 3. One stock's price history
+
+For each stock, the notebook keeps its daily closes, its daily log returns and which days were **results days**. A results filing made after the market closes moves the stock the next trading day; one made during the day moves it the same day.
+
+Conventions, the same as in the other notebooks:
+
+- A forecast "as of" a date is made at the start of that day, so only closes on earlier days are known.
+- The thresholds for "large" moves use the past year of all daily returns, results days included, as in the forecast definition. Only the baselines' estimate of the coming month's movement changes between versions, never the thresholds.
+
+#%% core
+class Stock:
+    def __init__(self, ticker, px, results):
+        px = px.dropna()
+        self.ticker = ticker
+        self.dates = np.array(px.index.values, dtype="datetime64[D]")
+        self.logp = np.log(px.to_numpy(dtype=float))
+        self.ret = np.concatenate([[np.nan], np.diff(self.logp)])      # ret[t] = move from close t-1 to close t
+        self.results = sorted(results)
+        self.reaction = np.zeros(len(self.dates), dtype=bool)
+        self.reaction_pos = []
+        for a in self.results:
+            d = np.datetime64(a.date(), "D")
+            side = "right" if a.hour >= AFTER_CLOSE_UTC_HOUR else "left"
+            t = int(np.searchsorted(self.dates, d, side=side))
+            if 1 <= t < len(self.dates):
+                self.reaction[t] = True
+                self.reaction_pos.append(t)
+        self.reaction_pos = sorted(set(self.reaction_pos))
+        ok = ~self.reaction & ~np.isnan(self.ret)
+        self.cum_sq = np.concatenate([[0.0], np.cumsum(np.where(ok, self.ret, 0.0) ** 2)])
+        self.cum_n = np.concatenate([[0], np.cumsum(ok)])
+
+    def position(self, as_of):
+        """Index of the first trading day on or after as_of: closes before it are known."""
+        return int(np.searchsorted(self.dates, np.datetime64(as_of.date(), "D"), side="left"))
+
+    def can_forecast(self, i):
+        return i - 1 >= SIGMA_LOOKBACK and i + HORIZON - 1 < len(self.dates)
+
+    def sigma_year(self, i):
+        return float(np.std(self.ret[i - SIGMA_LOOKBACK:i]) * math.sqrt(HORIZON))
+
+    def thresholds(self, i):
+        s = self.sigma_year(i)
+        return -BUCKET_K * s, BUCKET_K * s
+
+    def realised_bucket(self, i):
+        lo, hi = self.thresholds(i)
+        r = self.logp[i + HORIZON - 1] - self.logp[i - 1]
+        return "fall" if r < lo else "gain" if r > hi else "flat"
+
+    def year_ex_var(self, i):
+        """Average squared daily move over the past year, results days left out."""
+        a = max(i - SIGMA_LOOKBACK, 0)
+        n = self.cum_n[i] - self.cum_n[a]
+        return float((self.cum_sq[i] - self.cum_sq[a]) / n) if n else float("nan")
+
+    def ewma_var(self, i, leave_out_results):
+        r = self.ret[i - SIGMA_LOOKBACK:i]
+        w = EWMA_DECAY ** np.arange(len(r))[::-1]
+        keep = ~np.isnan(r)
+        if leave_out_results:
+            keep &= ~self.reaction[i - SIGMA_LOOKBACK:i]
+        return float(np.sum(w[keep] * r[keep] ** 2) / np.sum(w[keep]))
+
+    def last_results(self, as_of):
+        past = [a for a in self.results if a < as_of]
+        return past[-1] if past else None
+
+    def earnings_in_window(self, as_of):
+        last = self.last_results(as_of)
+        return bool(last) and as_of < last + timedelta(days=EARNINGS_GAP_DAYS) <= as_of + timedelta(days=EARNINGS_WINDOW_DAYS)
+
+    def days_since_results(self, i):
+        past = [t for t in self.reaction_pos if t <= i - 1]
+        return i - past[-1] if past else None
+
+    def typical_move(self, i):
+        """Average size of the last 4 results-day moves known before position i."""
+        past = [t for t in self.reaction_pos if t <= i - 1][-4:]
+        return float(np.mean(np.abs(self.ret[past]))) if past else None
+
+    def typical_move_a(self, as_of):
+        """Version A's results-day move, as in the earlier notebooks: close on the filing date to the next close."""
+        moves = []
+        for a in [x for x in self.results if x < as_of][-4:]:
+            d = np.datetime64(a.date(), "D")
+            j = int(np.searchsorted(self.dates, d, side="right"))   # first close after the filing date
+            if 1 <= j < self.position(as_of):
+                moves.append(abs(self.logp[j] - self.logp[j - 1]))
+        return float(np.mean(moves)) if moves else None
+
+#%% md
+## 4. Versions A, B and C
+
+**How long version A stays fooled.** Recent days count most, but not only the last few: with the current weighting, a day 40 trading days ago still carries about 8% of the weight of yesterday. A 12% results-day jump therefore still inflates A's estimate weeks later, for most of the quarter. B removes this by leaving results days out.
+
+Each version gives a variance for the coming month (how much the stock is expected to move), turned into the three probabilities with the same thresholds. When results are expected within the month, each adds the typical results-day jump.
+
+#%% core
+def probs_from_var(var_month, lower, upper):
+    s = math.sqrt(var_month)
+    fall, gain = norm.cdf(lower / s), 1 - norm.cdf(upper / s)
+    return {"fall": 100 * fall, "flat": 100 * (1 - fall - gain), "gain": 100 * gain}
+
+def core_vars(stock, i):
+    """Monthly variance before any results-day jump, for versions A, B and C."""
+    return {"A": stock.ewma_var(i, leave_out_results=False) * HORIZON,
+            "B": stock.ewma_var(i, leave_out_results=True) * HORIZON,
+            "C": (BLEND_RECENT * stock.ewma_var(i, leave_out_results=True)
+                  + (1 - BLEND_RECENT) * stock.year_ex_var(i)) * HORIZON}
+
+def baselines(stock, as_of, calm=None):
+    """Fall / flat / gain (percent) for every version at one forecast date."""
+    i = stock.position(as_of)
+    lower, upper = stock.thresholds(i)
+    v = core_vars(stock, i)
+    if calm is not None:
+        k = stock.days_since_results(i)
+        v["D"] = v["C"] * calm.factor(k, as_of)
+    jump = stock.earnings_in_window(as_of)
+    out = {}
+    for name, var in v.items():
+        move = (stock.typical_move_a(as_of) if name == "A" else stock.typical_move(i)) if jump else None
+        out[name] = probs_from_var(var + (move or 0.0) ** 2, lower, upper)
+    out["Fixed guess"] = dict(FIXED_GUESS)
+    return out
