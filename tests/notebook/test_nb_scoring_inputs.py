@@ -214,3 +214,74 @@ def test_no_previous_filing_counts_as_new():
 def test_no_effect_reading_gets_the_opposite_novelty():
     assert ns["reading_novelty"]("none", 0.1) == pytest.approx(0.9)
     assert ns["reading_novelty"]("fall", 0.1) == pytest.approx(0.1)
+
+
+# ---------- price reaction ----------
+
+def drift_market(n_days=1600, every=60, first=400, seed=1):
+    """Half the events: a 6% drop on the reaction day and a further slide over the next 21 days.
+    The other half: a 6% rise and nothing after. The market index moves on its own."""
+    rng = np.random.default_rng(seed)
+    logp = np.cumsum(rng.normal(0, 0.008, n_days))
+    mkt = np.cumsum(rng.normal(0, 0.006, n_days))
+    idx = pd.bdate_range("2019-01-01", periods=n_days)
+    events = []
+    for j, e in enumerate(range(first, n_days - 40, every)):
+        if j % 2 == 0:
+            logp[e + 1:] -= 0.06
+            for k in range(2, 23):
+                logp[e + k:] -= 0.01
+        else:
+            logp[e + 1:] += 0.06
+        events.append(("8-K 2.02", idx[e].to_pydatetime().replace(tzinfo=UTC, hour=21)))
+    return (pd.Series(100 * np.exp(logp), index=idx), pd.Series(100 * np.exp(mkt), index=idx), events, idx)
+
+
+def test_reaction_is_measured_against_the_market():
+    px, mkt, events, idx = drift_market()
+    case = ns["CaseMemory"]({"XYZ": events}, {"XYZ": px}, market=mkt)
+    rx = case.reaction("XYZ", events[0][1], 2)
+    assert rx["bucket"] == "big fall" and rx["days"] == 1
+    assert rx["abnormal_return"] == pytest.approx(-0.06 + (px.pipe(np.log).diff().iloc[401] + 0.06)
+                                                  - mkt.pipe(np.log).diff().iloc[401], abs=1e-4)
+    assert case.reaction("XYZ", events[1][1], 2)["bucket"] == "big rise"
+
+
+def test_no_reaction_before_any_close_reflects_the_filing():
+    px, mkt, events, idx = drift_market()
+    case = ns["CaseMemory"]({"XYZ": events}, {"XYZ": px}, market=mkt)
+    assert case.reaction("XYZ", events[0][1], 0) is None
+    assert case.reaction("NOPE", events[0][1], 2) is None
+
+
+def test_market_wide_moves_are_not_company_reactions():
+    px, _, events, idx = drift_market()
+    case = ns["CaseMemory"]({"XYZ": events}, {"XYZ": px}, market=px)       # market = the stock itself
+    assert case.reaction("XYZ", events[0][1], 2)["bucket"] == "small"
+
+
+def test_base_rates_conditioned_on_the_reaction_find_the_drift():
+    px, mkt, events, idx = drift_market()
+    case = ns["CaseMemory"]({"XYZ": events}, {"XYZ": px}, market=mkt)
+    as_of = idx[-1].to_pydatetime().replace(tzinfo=UTC)
+    q_all, n_all, _ = case.distribution("8-K 2.02", 2, as_of)
+    q_fall, n_fall, _ = case.distribution("8-K 2.02", 2, as_of, reaction_bucket="big fall")
+    assert 0 < n_fall < n_all
+    assert q_fall["fall"] > q_all["fall"] + 0.15
+    after_fall, _ = case.score("fall", "medium", "8-K 2.02", 2, as_of, reaction_bucket="big fall")
+    after_rise, _ = case.score("fall", "medium", "8-K 2.02", 2, as_of, reaction_bucket="big rise")
+    assert after_fall > 0.5 and after_fall > after_rise + 0.1
+
+
+def test_any_event_type():
+    px, mkt, events, idx = drift_market()
+    case = ns["CaseMemory"]({"XYZ": events}, {"XYZ": px}, market=mkt)
+    as_of = idx[-1].to_pydatetime().replace(tzinfo=UTC)
+    assert case.distribution("*", 2, as_of)[1] == case.distribution("8-K 2.02", 2, as_of)[1]
+
+
+def test_reaction_appears_in_the_generator_prompt():
+    item = dict(chunk("i1", accepted="2026-07-30"), row=0)
+    msg = ns["item_message"](item, dt("2026-08-01"), {"abnormal_return": -0.071, "days": 1, "bucket": "big fall"})
+    assert "-7.1% against the S&P 500" in msg and "big fall" in msg
+    assert "Market reaction" not in ns["item_message"](item, dt("2026-08-01"))

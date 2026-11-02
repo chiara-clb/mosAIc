@@ -171,7 +171,7 @@ def test_prompt_only_parses_or_falls_back():
 # ---------- preparing items with a stand-in model ----------
 
 class FlatCase:
-    def score(self, effect, size, event, lag, as_of, p0=None):
+    def score(self, effect, size, event, lag, as_of, p0=None, **kw):
         return (0.5, {"n_events": None}) if effect == "none" else (0.7, {"n_events": 30})
 
 

@@ -100,6 +100,11 @@ SAME_STORY_SIMILARITY = 0.85      # two passages this similar describe the same 
 NOVELTY_SIM_RANGE = (0.5, 0.95)   # similarity to the previous filing: <= 0.5 fully new, >= 0.95 fully repeated
                                   # (a starting guess: check the diagnostic in section 9 on the first run)
 
+# Price reaction (proposed design: market information in case memory)
+MARKET_TICKER = "SPY"             # S&P 500 index fund, to separate company news from market moves
+REACTION_EDGES = (-2.0, -0.5, 0.5, 2.0)   # in typical daily moves (z-score) since the filing
+REACTION_LABELS = ("big fall", "fall", "small", "rise", "big rise")
+
 # Case memory
 PRIOR_STRENGTH = 20       # pseudo-events pulling small samples toward the overall frequencies
 BASE_RATE_SCALE = 0.02    # how fast the base-rate score moves away from 0.5
@@ -546,7 +551,7 @@ def results_dates(filings):
 import yfinance as yf
 
 PRICES = {}
-for t in sorted(set(CASE_TICKERS) | set(TICKERS)):
+for t in sorted(set(CASE_TICKERS) | set(TICKERS) | {MARKET_TICKER}):
     px = yf.download(t, start="2012-01-01", progress=False, auto_adjust=True)["Close"]
     PRICES[t] = px.squeeze().dropna()
     print(f"{t}: {len(PRICES[t])} days from {PRICES[t].index[0].date()}")
@@ -612,16 +617,52 @@ def total_shift(readings):
 3. **No look-ahead.** Only past events whose 21-day window ended before the forecast date are used.
 4. **Small samples are pulled toward the overall frequencies** (the share of all 21-day windows that ended in a fall, flat month or gain), with a weight of 20 pseudo-events. A rare event type therefore says little, and "no effect" wins.
 5. **The score** is the average improvement in log score from applying the shift, mapped to 0–1. "No effect" always scores 0.5, the neutral point.
+6. **Price reaction (proposed design).** The market's own verdict on a filing is how the stock moved since then. For each item, the move from the last close before the filing to the last close before the forecast date is measured against the S&P 500 and expressed in typical daily moves: big fall (below −2), fall, small, rise, big rise (above +2). Case memory then only counts past events of the same type *with the same kind of reaction* over the same delay, pulled toward all events of the type when there are few. This captures, for example, that stocks tend to keep drifting after a surprising results day. The reaction is also shown to the model when it proposes readings.
 
 #%% core
 class CaseMemory:
-    def __init__(self, events, prices):
-        """events: {ticker: [(event_key, accepted_datetime), ...]}; prices: {ticker: Series of closes}."""
-        self.events, self.cache = events, {}
+    def __init__(self, events, prices, market=None):
+        """events: {ticker: [(event_key, accepted_datetime), ...]}; prices: {ticker: Series of closes};
+        market: Series of closes of the market index, for price reactions (optional)."""
+        self.events, self.cache, self.reactions = events, {}, {}
         self.px = {}
         for t, s in prices.items():
             s = s.dropna()
             self.px[t] = (np.array(s.index.values, dtype="datetime64[D]"), np.log(s.to_numpy(dtype=float)))
+        self.mkt = None
+        if market is not None:
+            m = market.dropna()
+            self.mkt = (np.array(m.index.values, dtype="datetime64[D]"), np.log(m.to_numpy(dtype=float)))
+
+    def reaction(self, ticker, accepted, lag_days):
+        """How the stock moved since a filing, against the market, up to the last close before
+        accepted date + lag_days. Returns None when no close reflects the filing yet."""
+        key = (ticker, accepted, lag_days)
+        if key in self.reactions:
+            return self.reactions[key]
+        out = None
+        if ticker in self.px:
+            dates, logp = self.px[ticker]
+            side = "right" if accepted.hour >= 20 else "left"
+            i0 = int(np.searchsorted(dates, np.datetime64(accepted.date(), "D"), side=side))     # first reacting close
+            e = int(np.searchsorted(dates, np.datetime64(accepted.date() + timedelta(days=lag_days), "D"))) - 1
+            if 2 <= i0 <= e < len(dates):
+                stock = float(logp[e] - logp[i0 - 1])
+                market = 0.0
+                if self.mkt is not None:
+                    md, ml = self.mkt
+                    a = int(np.searchsorted(md, dates[i0 - 1], side="right")) - 1
+                    b = int(np.searchsorted(md, dates[e], side="right")) - 1
+                    if a >= 0 and b >= a:
+                        market = float(ml[b] - ml[a])
+                r = np.diff(logp[max(0, i0 - 1 - SIGMA_LOOKBACK):i0])
+                daily = float(r.std()) if len(r) > 20 else 0.0
+                abnormal = stock - market
+                z = abnormal / (daily * math.sqrt(e - i0 + 1)) if daily > 0 else 0.0
+                bucket = REACTION_LABELS[int(np.searchsorted(REACTION_EDGES, z, side="right"))]
+                out = {"abnormal_return": round(abnormal, 4), "z": round(z, 2), "bucket": bucket, "days": e - i0 + 1}
+        self.reactions[key] = out
+        return out
 
     def window(self, ticker, start_date):
         """Bucket of the 21 trading days from start_date, and the date the window ends."""
@@ -650,26 +691,40 @@ class CaseMemory:
         n = sum(counts.values())
         return {k: counts[k] / n for k in OUTCOMES} if n else {"fall": 0.3085, "flat": 0.383, "gain": 0.3085}
 
-    def distribution(self, event, lag_days, as_of, p0=None):
-        """Smoothed bucket frequencies after past events of this type, and the number of events used."""
+    def distribution(self, event, lag_days, as_of, p0=None, reaction_bucket=None):
+        """Smoothed bucket frequencies after past events of this type, and the number of events used.
+
+        event "*" means any event type. With reaction_bucket, only past events whose stock reacted the same
+        way over the same delay count, and their frequencies are pulled toward those of all events of the type.
+        """
         p0 = p0 or self.overall(as_of)
         counts = dict.fromkeys(OUTCOMES, 0)
+        counts_r = dict.fromkeys(OUTCOMES, 0)
         for t, evs in self.events.items():
             for key, accepted in evs:
-                if key != event or accepted >= as_of:
+                if (event != "*" and key != event) or accepted >= as_of:
                     continue
                 b, end = self.window(t, accepted.date() + timedelta(days=lag_days))
-                if b and end < as_of.date():
-                    counts[b] += 1
+                if not b or end >= as_of.date():
+                    continue
+                counts[b] += 1
+                if reaction_bucket:
+                    rx = self.reaction(t, accepted, lag_days)
+                    if rx and rx["bucket"] == reaction_bucket:
+                        counts_r[b] += 1
         n = sum(counts.values())
         q = {k: (counts[k] + PRIOR_STRENGTH * p0[k]) / (n + PRIOR_STRENGTH) for k in OUTCOMES}
-        return q, n, p0
+        if not reaction_bucket:
+            return q, n, p0
+        n_r = sum(counts_r.values())
+        q_r = {k: (counts_r[k] + PRIOR_STRENGTH * q[k]) / (n_r + PRIOR_STRENGTH) for k in OUTCOMES}
+        return q_r, n_r, p0
 
-    def score(self, effect, size, event, lag_days, as_of, p0=None):
+    def score(self, effect, size, event, lag_days, as_of, p0=None, reaction_bucket=None):
         """0-1 score; 0.5 = no evidence either way. Returns (score, details)."""
         if effect == "none":
             return 0.5, {"n_events": None}
-        q, n, p0 = self.distribution(event, lag_days, as_of, p0)
+        q, n, p0 = self.distribution(event, lag_days, as_of, p0, reaction_bucket)
         s = shift_for(effect, size)
         p1 = {k: max(p0[k] + s[k] / 100, 0.01) for k in OUTCOMES}
         z = sum(p1.values())
@@ -714,7 +769,7 @@ def reading_novelty(effect, nov):
 #%% code
 EVENTS = {t: [(event_key(r["form"], r.get("items", "")), parse_accepted(r["acceptanceDateTime"])) for r in FILINGS[t]]
           for t in CASE_TICKERS}
-CASE = CaseMemory(EVENTS, {t: PRICES[t] for t in CASE_TICKERS})
+CASE = CaseMemory(EVENTS, {t: PRICES[t] for t in CASE_TICKERS}, market=PRICES[MARKET_TICKER])
 print("Event types with the most history:")
 print(pd.Series([k for evs in EVENTS.values() for k, _ in evs]).value_counts().head(12))
 
@@ -812,16 +867,19 @@ Reply with ONLY a JSON list of two objects."""
 
 NO_EFFECT_REASON = "Routine or already reflected in the price; no change to the outlook."
 
-def item_message(item, as_of):
+def item_message(item, as_of, reaction=None):
     days = (as_of.date() - datetime.fromisoformat(item["accepted"]).date()).days
-    return (f"Company: {item['company']} ({item['ticker']}). Forecast date: {as_of.date()}.\n"
-            f"{item['form']} | {item['section']} | filed {item['accepted'][:10]} ({days} days before the forecast date)\n\n"
-            f"{item['text']}")
+    msg = (f"Company: {item['company']} ({item['ticker']}). Forecast date: {as_of.date()}.\n"
+           f"{item['form']} | {item['section']} | filed {item['accepted'][:10]} ({days} days before the forecast date)\n")
+    if reaction:
+        msg += (f"Market reaction since then: the stock moved {100 * reaction['abnormal_return']:+.1f}% against the "
+                f"S&P 500 over {reaction['days']} trading day(s) ({reaction['bucket']}).\n")
+    return msg + "\n" + item["text"]
 
-def propose_readings(model, item, as_of):
+def propose_readings(model, item, as_of, reaction=None):
     """Up to 3 readings: the model's (most plausible first), plus 'no effect' if missing."""
     reply = model([{"role": "system", "content": GEN_SYSTEM},
-                   {"role": "user", "content": item_message(item, as_of)}], max_tokens=300)
+                   {"role": "user", "content": item_message(item, as_of, reaction)}], max_tokens=300)
     data = parse_json(reply, "[") or []
     readings, seen = [], set()
     for d in data if isinstance(data, list) else []:
@@ -880,12 +938,15 @@ def prepare_items(model, items, as_of, case, index, p0=None):
         item = dict(item, vec=index.emb[item["row"]])          # used by the same-story check
         lag = (as_of.date() - datetime.fromisoformat(item["accepted"]).date()).days
         nov, prev = novelty(index, item)
-        entry = {"item": item, "novelty": nov, "previous_filing": prev, "lag_days": lag, "raw": None}
+        reaction = case.reaction(item["ticker"], datetime.fromisoformat(item["accepted"]), lag) \
+            if hasattr(case, "reaction") else None
+        entry = {"item": item, "novelty": nov, "previous_filing": prev, "lag_days": lag, "raw": None,
+                 "reaction": reaction}
         if model.calls >= MAX_MODEL_CALLS:
             readings = [{"effect": "none", "size": "small", "reason": NO_EFFECT_REASON, "source": item["id"]}]
             entry["raw"] = "budget used up"
         else:
-            readings, entry["raw"] = propose_readings(model, item, as_of)
+            readings, entry["raw"] = propose_readings(model, item, as_of, reaction)
         for r in readings:
             r["ok"], r["why"] = True, ""
             if r["effect"] != "none" and not date_ok(item, as_of):
@@ -896,7 +957,8 @@ def prepare_items(model, items, as_of, case, index, p0=None):
                 ok, _ = grounded(model, item, r)
                 if not ok:
                     r["ok"], r["why"] = False, "failed grounding"
-            br, detail = case.score(r["effect"], r["size"], item["event"], lag, as_of, p0)
+            br, detail = case.score(r["effect"], r["size"], item["event"], lag, as_of, p0,
+                                    reaction_bucket=reaction["bucket"] if reaction else None)
             r["base_rate"], r["n_events"] = br, detail.get("n_events")
             r["novelty"] = reading_novelty(r["effect"], nov)
             wb, wn = WEIGHTS["base_rate"], WEIGHTS["novelty"]
@@ -1196,8 +1258,10 @@ def print_tree(record, max_depth=None):
                 walk(c, indent + "    ")
     walk(nodes[0], "  ")
     for d, e in enumerate(prepared, start=1):
+        rx = e.get("reaction")
+        rx_text = f" | reaction {100 * rx['abnormal_return']:+.1f}% vs market ({rx['bucket']})" if rx else ""
         lines.append(f"  level {d}: {e['item']['form']} | {e['item']['section']} | filed {e['item']['accepted'][:10]} "
-                     f"| novelty {e['novelty']:.2f}")
+                     f"| novelty {e['novelty']:.2f}{rx_text}")
     return "\n".join(lines)
 
 def find_record(records, words):
