@@ -89,6 +89,12 @@ def test_all_no_effect_node_is_always_kept():
         assert node["status"] in ("kept", "chosen"), node
 
 
+def test_beam_1_is_a_real_greedy_search_even_with_the_rule_on():
+    p = tree([("fall", 0.95)], [("fall", 0.95)])
+    res = ns["beam_search"](p, BASE, beam_width=1, keep_no_effect=True)
+    assert [r["effect"] for r in res["ledger"]] == ["fall", "fall"]
+
+
 def test_without_the_rule_greedy_beam_1_can_drop_it():
     p = tree([("fall", 0.95)], [("fall", 0.95)])
     res = ns["beam_search"](p, BASE, beam_width=1, keep_no_effect=False)

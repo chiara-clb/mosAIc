@@ -798,7 +798,7 @@ ToT-BFS with breadth 3, as in Checkpoint 4:
 - **Node:** the baseline plus one chosen reading for each item read so far. **Depth** = number of items read.
 - **Node score** = weighted average of its readings' scores (base rate and novelty, weight 0.8) and its consistency (weight 0.2). Consistency is 1 minus penalties: 0.5 for each pair of effect readings whose passages tell the same story (similarity above 0.85), and the share of the shift removed by the 15-point cap.
 - **Keep** the top 3 children at each level. **Drop** any child more than 0.3 below the best.
-- **Always keep** the all-"no effect" node, so the baseline can still win.
+- **Always keep** the all-"no effect" node, so the baseline can still win. This needs at least 2 slots: with a beam of 1 the rule would fill the only slot and the search could never choose anything else.
 - **Ties** go to the smaller total shift.
 - **Every node is logged**, pruned ones too, with its parent, readings and score.
 
@@ -833,6 +833,7 @@ def beam_search(prepared, base, beam_width=None, prune_margin="default", keep_no
     beam_width = beam_width or BEAM_WIDTH
     prune_margin = PRUNE_MARGIN if prune_margin == "default" else prune_margin
     keep_no_effect = KEEP_NO_EFFECT_NODE if keep_no_effect is None else keep_no_effect
+    keep_no_effect = keep_no_effect and beam_width >= 2   # with one slot, the rule would always force the baseline
     root = {"id": 0, "parent": None, "depth": 0, "choice": (), "score": 0.5, "shift": 0.0, "status": "root", "why": ""}
     nodes, frontier = [root], [root]
     for depth, entry in enumerate(prepared, start=1):
