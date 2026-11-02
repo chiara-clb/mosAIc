@@ -157,3 +157,31 @@ def test_every_scenario_runs_and_is_reported(run):
     table = ns["results_by_scenario"](records)
     assert set(table.index) == set(ns["SCENARIOS"])
     assert table["forecasts"].sum() == len(records)
+
+
+def test_evidence_check_explains_empty_forecasts(run):
+    records, _, _ = run
+    ec = ns["evidence_check"](records)
+    assert len(ec) == len(records)
+    scores = ec.filter(like="best score")
+    for i, r in ec.iterrows():
+        if r["items"] == 0:
+            no_filings = r["chunks in window"] == 0
+            nothing_matched = all(isinstance(v, str) for v in scores.loc[i])
+            assert no_filings or nothing_matched
+
+
+def test_novelty_examples_pair_passages_with_previous_filing():
+    import numpy as np
+    from tests.notebook.helpers import chunk, unit
+    a = chunk("p", filing="Q1", accepted="2026-05-01", section="Item 1A. Risk Factors", text="old wording")
+    b = chunk("c", filing="Q2", accepted="2026-07-31", section="Item 1A. Risk Factors", text="new wording")
+    idx = ns["Index"]([a, b], np.array([unit(1, 0), unit(0.9, 0.436)], dtype=np.float32))
+    for ch in idx.chunks:
+        ch["section_key"] = ns["section_key"](ch["section"])
+    item = dict(idx.chunks[1], row=1)
+    rec = {"prepared": [{"item": item, "novelty": 0.11, "previous_filing": "Q1"}]}
+    low, high = ns["novelty_examples"]([rec], idx)
+    assert len(low) == 1 and high == []
+    assert "new wording" in low[0]["passage"] and "old wording" in low[0]["closest in previous filing"]
+    assert low[0]["similarity"] == pytest.approx(0.9, abs=0.01)

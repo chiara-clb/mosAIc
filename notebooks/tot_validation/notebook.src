@@ -990,6 +990,8 @@ def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, com
     since = as_of - timedelta(days=FRESH_DAYS)
     searches = [search_index(index, embed_fn(q), ticker, as_of, since=since) for q in QUERIES]
     evidence = select_evidence(index, searches)
+    in_window = sum(1 for i, c in enumerate(index.chunks)
+                    if c["ticker"] == ticker and since <= index.accepted[i] < as_of)
     model = Model(chat_fn)
     p0 = case.overall(as_of)
     prepared = prepare_items(model, evidence, as_of, case, index, p0)
@@ -1012,6 +1014,9 @@ def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, com
     return {
         "id": fid, "ticker": ticker, "as_of": as_of, "outcome": outcome, "baseline_info": info,
         "evidence": [{k: e[k] for k in ("id", "form", "section", "accepted", "score", "text")} for e in evidence],
+        "search_check": {"chunks in window": in_window,
+                         **{f"best score: {q[:30]}": (max(r["score"] for r in s["results"]) if s["results"] else s["status"])
+                            for q, s in zip(QUERIES, searches)}},
         "prepared": prepared, "base": base,
         "variants": {"baseline": base, "prompt only": po, "single pass": single["final"],
                      "ToT beam 1": tot1["final"], "ToT beam 3": tot3["final"]},
@@ -1113,6 +1118,29 @@ def find_record(records, words):
             if words.lower() in (e["item"]["section"] + " " + e["item"]["text"]).lower():
                 return r
     return None
+
+def evidence_check(records):
+    """Why a forecast found little evidence: chunks available in its 30-day window and the best score per search."""
+    return pd.DataFrame([{"forecast": r["id"], "scenario": r.get("scenario", ""), "items": len(r["prepared"]),
+                          **r["search_check"]} for r in records])
+
+def novelty_examples(records, index, n=3):
+    """The passages with the lowest and highest novelty, each next to its closest chunk in the previous filing."""
+    seen, rows = set(), []
+    for r in records:
+        for e in r["prepared"]:
+            it = e["item"]
+            if e["previous_filing"] is None or it["id"] in seen:
+                continue
+            seen.add(it["id"])
+            prev_rows, _ = previous_filing_rows(index, it)
+            sims = index.emb[prev_rows] @ index.emb[it["row"]]
+            j = prev_rows[int(np.argmax(sims))]
+            rows.append({"novelty": round(e["novelty"], 2), "similarity": round(float(np.max(sims)), 3),
+                         "passage": f"{it['form']} | {it['section']} | {it['accepted'][:10]}: {it['text'][:300]}",
+                         "closest in previous filing": f"{index.chunks[j]['accepted'][:10]}: {index.chunks[j]['text'][:300]}"})
+    rows.sort(key=lambda x: x["novelty"])
+    return rows[:n], rows[-n:] if len(rows) > n else []
 
 def leakage_audit(records):
     problems = []
@@ -1300,6 +1328,29 @@ print(nov.describe().round(2))
 nov.plot(kind="hist", bins=20, title="Novelty of evidence passages", figsize=(6, 2.5)); plt.show()
 kept_baseline = sum(not r["tot"]["ledger"] for r in RECORDS)
 print(f"ToT kept the baseline (all 'no effect') in {kept_baseline} of {len(RECORDS)} forecasts")
+
+#%% md
+### Diagnostic: why some forecasts find little evidence
+
+For each forecast: how many chunks of the stock's filings fall in the 30 days before the forecast date, and the best similarity score of each of the three searches (or "nothing relevant found" when even the best is below 0.30). Zero chunks means no filing in the window; chunks but low scores means the searches did not match the filings' wording.
+
+#%% code
+ec = evidence_check(RECORDS)
+display(ec[ec["items"] <= 1])
+
+#%% md
+### Diagnostic: is "repeated wording" really repeated?
+
+The three passages judged least new and the three judged most new, each next to its closest chunk in the previous filing. If the "least new" pairs read as the same text, the novelty check is right. If they read as different news in similar words, the cut-offs in `NOVELTY_SIM_RANGE` are too strict.
+
+#%% code
+low, high = novelty_examples(RECORDS, INDEX)
+for title, group in (("Least new", low), ("Most new", high)):
+    print(f"===== {title} =====")
+    for ex in group:
+        print(f"\nnovelty {ex['novelty']} (similarity {ex['similarity']})")
+        print("  THIS:    ", ex["passage"])
+        print("  PREVIOUS:", ex["closest in previous filing"])
 
 #%% md
 ### 5. Does it fit the budget?
