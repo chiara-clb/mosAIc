@@ -73,8 +73,13 @@ def run(tmp_path_factory):
     case = ns["CaseMemory"](events, {"XYZ": px})
     log = tmp_path_factory.mktemp("logs") / "branch_log.jsonl"
     dates = ns["forecast_dates"](filings, "2025-01-01", "2026-09-25")
-    records = [ns["run_forecast"]("XYZ", d, fake_chat, index, case, px, filings, QUERY_VEC.__getitem__,
-                                  company="XYZ Corp", branch_log=str(log)) for d in dates]
+    plan = ns["scenario_dates"](filings, px.index, "2025-01-01", "2026-09-25")
+    records = []
+    for d, sc in plan:
+        rec = ns["run_forecast"]("XYZ", d, fake_chat, index, case, px, filings, QUERY_VEC.__getitem__,
+                                 company="XYZ Corp", branch_log=str(log))
+        rec["scenario"] = sc
+        records.append(rec)
     return records, log, dates
 
 
@@ -87,7 +92,9 @@ def test_forecast_dates_are_two_days_after_results(run):
 def test_each_forecast_has_evidence_variants_and_outcome(run):
     records, _, _ = run
     for r in records:
-        assert 1 <= len(r["evidence"]) <= 5
+        assert len(r["evidence"]) <= 5
+        if r["scenario"] in ("after results", "event"):        # a filing two days earlier is always there
+            assert len(r["evidence"]) >= 1
         assert set(r["variants"]) == {"baseline", "prompt only", "single pass", "ToT beam 1", "ToT beam 3"}
         assert all(sum(v.values()) == pytest.approx(100, abs=0.05) for v in r["variants"].values())
         assert r["outcome"] in ("fall", "flat", "gain")
@@ -142,3 +149,11 @@ def test_slim_records_are_json_serialisable(run):
     r = dict(records[0])
     keep = {k: v for k, v in r.items() if k not in ("prepared", "tot", "tot1", "single", "exhaustive")}
     json.dumps(keep, default=str)
+
+
+def test_every_scenario_runs_and_is_reported(run):
+    records, _, _ = run
+    assert {r["scenario"] for r in records} == set(ns["SCENARIOS"])
+    table = ns["results_by_scenario"](records)
+    assert set(table.index) == set(ns["SCENARIOS"])
+    assert table["forecasts"].sum() == len(records)

@@ -10,8 +10,9 @@ Checkpoint 4 replaced the single-pass synthesis step with a Tree of Thought (ToT
 3. **Are beam width 3 and the 0.3 pruning margin sensible?** A sweep that costs no extra model calls.
 4. **Search error or scoring error?** Does the beam find the ledger the scoring likes best, and does the scoring like the ledgers that turned out right?
 5. **Does it fit the budget?** Model calls and time per forecast.
+6. **Where does it help?** The same comparison in five test scenarios: right after results, mid-quarter, just before results, after other company events, and random weeks.
 
-**What this notebook cannot test yet.** The main metric in the design is log loss against the probabilities implied by option prices, and that data is not bought yet. Here every forecast is scored against what actually happened (Brier score). With about 20 forecasts that is an indication, not a proof. The scoring weights stay at their defaults, since tuning them needs the option data.
+**What this notebook cannot test yet.** The main metric in the design is log loss against the probabilities implied by option prices, and that data is not bought yet. Here every forecast is scored against what actually happened (Brier score). With about 120 forecasts that is an indication, not a proof. The scoring weights stay at their defaults, since tuning them needs the option data.
 
 **Before you run:** set `USER_AGENT` to your name and email (the SEC requires it). Use a GPU runtime (Runtime → Change runtime type → T4 GPU).
 
@@ -47,10 +48,16 @@ CASE_TICKERS = ["AAPL", "MSFT", "NVDA", "INTC", "GOOGL", "META", "NFLX", "AMZN",
                 "JPM", "GS", "V", "JNJ", "UNH", "LLY", "PG", "KO", "WMT", "XOM", "CVX",
                 "CAT", "BA", "LMT", "NEE", "DUK", "PLD", "AMT", "LIN", "FCX"]
 
-# Forecast dates: 2 days after each results filing (8-K item 2.02) in this window.
+# Forecast dates: five test scenarios in this window (section 16).
 # The window ends early enough for the 21-trading-day outcome to be known.
 START_DATE, END_DATE = "2025-01-01", "2026-09-25"
-DAYS_AFTER_RESULTS = 2
+DAYS_AFTER_RESULTS = 2            # "after results" and "event" scenarios: calendar days after the filing
+MID_QUARTER_DAYS = 30             # "mid-quarter": trading days after the results reaction
+RESULTS_COMING_DAYS = 55          # "results coming": trading days after the results reaction
+EVENT_ITEMS = ("1.01", "1.02", "1.05", "2.01", "2.05", "2.06", "5.02")   # deals, cyber incidents, acquisitions,
+                                  # restructuring, impairments, management changes
+RANDOM_PER_TICKER = 8             # "random": Mondays drawn at random
+SCENARIO_SEED = 0
 
 # Forecast definition (Checkpoint 1.1)
 HORIZON = 21              # trading days
@@ -1116,9 +1123,87 @@ def leakage_audit(records):
     return problems
 
 #%% md
+### Test scenarios
+
+The first run only used forecasts made 2 days after results. That is one phase of the quarter (usually a calm month) with one kind of evidence (a results release and a 10-Q, mostly repeated wording). To see where ToT helps and where it does not, forecasts now come from five scenarios:
+
+| Scenario | Forecast date | What it tests |
+| --- | --- | --- |
+| after results | 2 days after a results filing | the first run's case, for comparison |
+| mid-quarter | 30 trading days after the results reaction | quiet periods with little news |
+| results coming | 55 trading days after the results reaction, when the next results fall inside the month | the hardest phase for the baseline |
+| event | 2 days after an 8-K about a deal, an acquisition, a restructuring, an impairment, a cyber incident or a management change | evidence-rich cases, where ToT should matter most |
+| random | Mondays drawn at random | an unbiased check |
+
+Expect few or no evidence items in the mid-quarter and random scenarios: often no company filing falls in the 30 days before the date, and ToT then simply keeps the baseline. News, planned as the next step, is what fills those gaps.
+
+The actual next results date is used only to pick "results coming" dates, never as an input to the forecast. When two scenarios give the same date for a stock, it is counted once, under the first scenario in the order event, after results, results coming, mid-quarter, random.
+
+#%% core
+SCENARIOS = ("event", "after results", "results coming", "mid-quarter", "random")
+
+def _reaction_index(trading_days, accepted):
+    """Index of the first trading day that reflects a filing: the next day if filed after the close."""
+    d = np.datetime64(accepted.date(), "D")
+    side = "right" if accepted.hour >= 20 else "left"
+    return int(np.searchsorted(trading_days, d, side=side))
+
+def _midnight(day):
+    d = pd.Timestamp(day).date()
+    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+
+def scenario_dates(filings, trading_index, start, end, seed=None):
+    """Forecast dates for one stock, each labelled with its scenario."""
+    seed = SCENARIO_SEED if seed is None else seed
+    lo = datetime.fromisoformat(start).replace(tzinfo=timezone.utc)
+    hi = datetime.fromisoformat(end).replace(tzinfo=timezone.utc)
+    days = np.array(pd.DatetimeIndex(trading_index).values, dtype="datetime64[D]")
+    results = results_dates(filings)
+    found = []
+    for r in filings:
+        items = [c.strip() for c in str(r.get("items", "")).split(",")]
+        if r["form"] == "8-K" and "2.02" not in items and any(c in EVENT_ITEMS for c in items):
+            acc = parse_accepted(r["acceptanceDateTime"])
+            found.append((_midnight(acc) + timedelta(days=DAYS_AFTER_RESULTS), "event"))
+    for j, r in enumerate(results):
+        found.append((_midnight(r) + timedelta(days=DAYS_AFTER_RESULTS), "after results"))
+        k = _reaction_index(days, r)
+        if k + MID_QUARTER_DAYS < len(days):
+            found.append((_midnight(days[k + MID_QUARTER_DAYS]), "mid-quarter"))
+        if k + RESULTS_COMING_DAYS + HORIZON - 1 < len(days) and j + 1 < len(results):
+            start_i = k + RESULTS_COMING_DAYS
+            nxt = _reaction_index(days, results[j + 1])
+            if start_i <= nxt <= start_i + HORIZON - 1:
+                found.append((_midnight(days[start_i]), "results coming"))
+    mondays = [d for d in pd.date_range(lo, hi, freq="W-MON")]
+    rng = np.random.default_rng(seed)
+    for d in rng.choice(len(mondays), size=min(RANDOM_PER_TICKER, len(mondays)), replace=False) if mondays else []:
+        found.append((_midnight(mondays[d]), "random"))
+    best = {}
+    for as_of, sc in found:
+        if lo <= as_of <= hi and (as_of not in best or SCENARIOS.index(sc) < SCENARIOS.index(best[as_of])):
+            best[as_of] = sc
+    return sorted(best.items())
+
+def results_by_scenario(records):
+    """Mean Brier score per variant within each scenario, plus how much evidence and change there was."""
+    rows = []
+    for sc in SCENARIOS:
+        recs = [r for r in records if r.get("scenario") == sc and r["outcome"]]
+        if not recs:
+            continue
+        row = {"scenario": sc, "forecasts": len(recs),
+               "evidence items": round(float(np.mean([len(r["prepared"]) for r in recs])), 1),
+               "ToT changed the baseline": sum(bool(r["tot"]["ledger"]) for r in recs)}
+        for name in recs[0]["variants"]:
+            row[name] = round(float(np.mean([brier(r["variants"][name], r["outcome"]) for r in recs])), 4)
+        rows.append(row)
+    return pd.DataFrame(rows).set_index("scenario")
+
+#%% md
 ### Run the forecasts
 
-About 20 forecasts. With Qwen2.5-3B on a T4 expect a few minutes per forecast. The branch log (every node, pruned ones too) is written to `branch_log.jsonl`.
+About 40 forecasts per stock. With Qwen2.5-3B on a T4 expect 30 to 40 minutes for three stocks. The branch log (every node, pruned ones too) is written to `branch_log.jsonl`.
 
 #%% code
 import os
@@ -1127,11 +1212,14 @@ if os.path.exists(BRANCH_LOG):
 
 RECORDS = []
 for t in TICKERS:
-    for as_of in forecast_dates(FILINGS[t], START_DATE, END_DATE):
+    plan = scenario_dates(FILINGS[t], PRICES[t].index, START_DATE, END_DATE)
+    print(f"{t}: " + ", ".join(f"{sc} {sum(s == sc for _, s in plan)}" for sc in SCENARIOS))
+    for as_of, sc in plan:
         rec = run_forecast(t, as_of, CHAT, INDEX, CASE, PRICES[t], FILINGS[t], embed_query,
                            company=NAMES[t], branch_log=BRANCH_LOG)
+        rec["scenario"] = sc
         RECORDS.append(rec)
-        print(f"{rec['id']}: {len(rec['prepared'])} items, {rec['calls_tot']} calls, "
+        print(f"  {rec['id']} [{sc}]: {len(rec['prepared'])} items, {rec['calls_tot']} calls, "
               f"ToT {rec['variants']['ToT beam 3']}  outcome {rec['outcome']}")
 
 def slim(rec):
@@ -1143,7 +1231,7 @@ json.dump([slim(r) for r in RECORDS], open("records.json", "w"), default=str, in
 #%% md
 ### 1. Does searching over readings help?
 
-Lower Brier is better. "vs baseline" is the average difference from the baseline on the same forecasts (negative = better), with a 95% interval from resampling the forecasts. With about 20 forecasts, expect wide intervals: the direction is the signal to look for, not a proof.
+Lower Brier is better. "vs baseline" is the average difference from the baseline on the same forecasts (negative = better), with a 95% interval from resampling the forecasts. With about 120 forecasts, expect fairly wide intervals: the direction is the signal to look for, not a proof.
 
 #%% code
 import matplotlib.pyplot as plt
@@ -1155,6 +1243,14 @@ ax = table["mean Brier"].plot(kind="bar", rot=0, figsize=(8, 3.5), color="steelb
 ax.set_ylabel("Brier score")
 plt.tight_layout(); plt.show()
 print("Prompt-only replies that could be read:", sum(r["prompt_only_parsed"] for r in RECORDS), "of", len(RECORDS))
+
+#%% md
+### By scenario
+
+The same scores within each scenario. With 10 to 25 forecasts per scenario these are indications: look for scenarios where ToT clearly differs from the single pass or the baseline.
+
+#%% code
+display(results_by_scenario(RECORDS))
 
 #%% md
 ### 2. The Apple legal-proceedings case
@@ -1229,10 +1325,11 @@ assert not problems, problems
 
 Fill in after the run:
 
-1. **Single pass vs ToT:** did ToT change ledgers, and in which direction did the Brier score move?
-2. **"No effect":** in how many forecasts did ToT keep the baseline? Was the legal-proceedings passage read as "no effect"?
-3. **Settings:** did beam width or margin change the chosen ledgers? If not, beam 3 is wide enough.
-4. **Search vs scoring:** where errors come from tells you whether to change the search or the weights.
-5. **Cost:** calls and seconds per forecast against the Checkpoint 4 budget.
+1. **Scenarios:** where does ToT differ most from the single pass and the baseline? Event-driven forecasts should show the largest effect.
+2. **Single pass vs ToT:** did ToT change ledgers, and in which direction did the Brier score move?
+3. **"No effect":** in how many forecasts did ToT keep the baseline? Was the legal-proceedings passage read as "no effect"?
+4. **Settings:** did beam width or margin change the chosen ledgers? If not, beam 3 is wide enough.
+5. **Search vs scoring:** where errors come from tells you whether to change the search or the weights.
+6. **Cost:** calls and seconds per forecast against the Checkpoint 4 budget.
 
-**Limits.** Scored against actual outcomes, not the option-implied answer key; about 20 forecasts; three fixed searches instead of the ReAct loop; default weights; a small open model. The same notebook can be rerun with a 7B or API model by changing `LLM_BACKEND` and `LLM_MODEL`.
+**Limits.** Scored against actual outcomes, not the option-implied answer key; about 120 forecasts in five scenarios; three fixed searches instead of the ReAct loop; default weights; a small open model. The same notebook can be rerun with a 7B or API model by changing `LLM_BACKEND` and `LLM_MODEL`.
