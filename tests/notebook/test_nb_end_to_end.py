@@ -79,6 +79,15 @@ def fake_chat(messages, max_tokens):
     return '{"fall": 25, "flat": 45, "gain": 30}'
 
 
+def fake_news(ticker, company, as_of):
+    """Two headlines a few days before every forecast date, and a flat tone timeline."""
+    fmt = "%Y%m%dT%H%M%SZ"
+    arts = [{"title": "XYZ Corp faces regulator probe", "seendate": (as_of - timedelta(days=4 + k)).strftime(fmt),
+             "domain": "example.com", "url": f"https://example.com/{k}"} for k in range(2)]
+    tone = {"timeline": [{"data": [{"date": (as_of - timedelta(days=d)).strftime(fmt), "value": -1.0} for d in range(1, 70)]}]}
+    return {"articles": arts}, tone
+
+
 @pytest.fixture(scope="module")
 def run(tmp_path_factory):
     px, filings, chunks, emb = synthetic_world()
@@ -92,7 +101,7 @@ def run(tmp_path_factory):
     records = []
     for d, sc in plan:
         rec = ns["run_forecast"]("XYZ", d, fake_chat, index, case, px, filings, fake_embed,
-                                 company="XYZ Corp", branch_log=str(log))
+                                 company="XYZ Corp", branch_log=str(log), news_fn=fake_news)
         rec["scenario"] = sc
         records.append(rec)
     return records, log, dates
@@ -207,3 +216,11 @@ def test_event_forecasts_find_their_filing(run):
     events = [r for r in records if r["scenario"] == "event"]
     assert events and all(len(r["evidence"]) >= 1 for r in events)
     assert all(any(e["id"].startswith("XYZ-8-K") for e in r["evidence"]) for r in events)
+
+
+def test_news_reaches_the_forecasts_without_breaking_the_budget(run):
+    records, _, _ = run
+    assert all(r["news_check"]["articles"] == 2 for r in records)
+    assert any(e["form"] == "News" for r in records for e in r["evidence"])
+    assert all(len(r["evidence"]) <= 5 and r["calls_tot"] <= ns["MAX_MODEL_CALLS"] for r in records)
+    assert ns["leakage_audit"](records) == []

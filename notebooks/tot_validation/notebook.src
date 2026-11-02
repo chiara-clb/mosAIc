@@ -14,6 +14,8 @@ Checkpoint 4 replaced the single-pass synthesis step with a Tree of Thought (ToT
 
 **What this notebook cannot test yet.** The main metric in the design is log loss against the probabilities implied by option prices, and that data is not bought yet. Here every forecast is scored against what actually happened (Brier score). With about 120 forecasts that is an indication, not a proof. The scoring weights stay at their defaults, since tuning them needs the option data.
 
+**What changed since the first run.** Every recent filing is now an evidence candidate (the searches alone discarded most of it); the baseline is version C from the baseline comparison; and two parts of the proposed design are included: the **price reaction** since each filing, against the S&P 500, used by case memory, and **news headlines and tone from GDELT**, with a same-story rule so a filing and its press coverage give one ledger line. Set `NEWS_ENABLED = False` to run without news and compare.
+
 **Before you run:** set `USER_AGENT` to your name and email (the SEC requires it). Use a GPU runtime (Runtime → Change runtime type → T4 GPU).
 
 #%% md
@@ -99,6 +101,19 @@ WEIGHTS = {"base_rate": 0.4, "novelty": 0.4, "consistency": 0.2}   # defaults; t
 SAME_STORY_SIMILARITY = 0.85      # two passages this similar describe the same story
 NOVELTY_SIM_RANGE = (0.5, 0.95)   # similarity to the previous filing: <= 0.5 fully new, >= 0.95 fully repeated
                                   # (a starting guess: check the diagnostic in section 9 on the first run)
+
+# News (proposed design): GDELT, free, no API key
+NEWS_ENABLED = True
+NEWS_DAYS = 14                    # headlines from the 14 days before the forecast date
+TONE_BASE_DAYS = 60               # news tone is compared with the 60 days before that
+NEWS_STORY_SIM = 0.6              # headlines this similar belong to the same story
+NEWS_MIN_ARTICLES = 2             # a story needs at least this many articles
+NEWS_MAX_STORIES = 2              # at most this many news items per forecast; filings fill the rest up to 5
+NEWS_LINK_DAYS = 3                # same-story rule: a story starting within 3 days of a filing...
+NEWS_LINK_SIM = 0.35              # ...and this similar to it is coverage of that filing, not a new line
+NEWS_NOVELTY = 0.5                # novelty of a news item: neutral (no previous filing to compare with)
+NEWS_NAMES = {}                   # optional search names, e.g. {"GOOGL": "Alphabet OR Google"}
+NEWS_LEAK = r"implied vol|implied move|options? (traders|market|activity|volume|pricing)|call options|put options"
 
 # Price reaction (proposed design: market information in case memory)
 MARKET_TICKER = "SPY"             # S&P 500 index fund, to separate company news from market moves
@@ -425,6 +440,158 @@ def select_evidence(index, results_by_query, k=None, lam=None):
     picked = mmr_select([r["score"] for r in cands], index.emb[rows], k, lam)
     chosen = [cands[j] for j in picked]
     return sorted(chosen, key=lambda r: (r["accepted"], r["score"]), reverse=True)
+
+#%% md
+## 5b. News from GDELT (proposed design)
+
+Filings alone leave the agent with nothing to read between results (the scenario run found well under one item per forecast mid-quarter). GDELT is a free, public index of news articles with the time each was first seen, searchable by keywords and date, with a tone score (how negative or positive the coverage is). It returns headlines, not article text, which also limits the room for instructions hidden in text.
+
+1. **Headlines** about the company from the 14 days before the forecast date; only articles first seen before the forecast date count. Headlines about options or implied volatility are dropped, since they would leak the answer key.
+2. **Stories:** headlines saying the same thing (similarity above 0.6) are grouped; a story needs at least 2 articles.
+3. **Same-story rule:** a story that starts within 3 days of a company filing and is similar to it is coverage of that filing. It does not get its own ledger line; its headlines are shown next to the filing. Other stories (an analyst downgrade, a lawsuit, a product problem) become evidence items of their own, at most 2 per forecast.
+4. **Tone:** the average tone of the company's coverage over the last 14 days, against the 60 days before, is shown next to every news item and linked filing.
+5. **Scoring:** case memory has no past news, so a news item's base rate uses any company event with the same price reaction; its novelty is neutral (0.5).
+
+GDELT's documentation says its news search officially covers the last 3 months; an older announcement says it reaches back to 2017. The coverage check after the run shows how many past forecasts actually got news.
+
+#%% core
+def news_name(company, ticker):
+    """Search name for a company: the override if given, else the SEC name without legal suffixes."""
+    if ticker in NEWS_NAMES:
+        return NEWS_NAMES[ticker]
+    name = re.sub(r"[,.]|/\w+/", " ", company)
+    name = re.sub(r"\b(inc|incorporated|corp|corporation|co|company|ltd|plc|holdings?|group|the|sa|nv|ag)\b", " ",
+                  name, flags=re.I)
+    return " ".join(name.split()) or ticker
+
+def news_query(company, ticker):
+    return f'"{news_name(company, ticker)}" (shares OR stock OR earnings OR analyst) sourcelang:english'
+
+def parse_articles(payload, as_of):
+    """GDELT article list -> [{title, seen, domain, url}] first seen before as_of, leak filter applied."""
+    out = []
+    for a in (payload or {}).get("articles", []):
+        try:
+            seen = datetime.strptime(a["seendate"], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        except (KeyError, ValueError):
+            continue
+        title = " ".join(str(a.get("title", "")).split())
+        if seen < as_of and title and not re.search(NEWS_LEAK, title, re.I):
+            out.append({"title": title, "seen": seen, "domain": a.get("domain", ""), "url": a.get("url", "")})
+    return sorted(out, key=lambda a: a["seen"])
+
+def tone_shift(payload, as_of):
+    """Average tone over the last NEWS_DAYS days and over the TONE_BASE_DAYS before, from a GDELT tone timeline."""
+    points = []
+    for series in (payload or {}).get("timeline", []):
+        for d in series.get("data", []):
+            try:
+                when = datetime.strptime(d["date"], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+                points.append((when, float(d["value"])))
+            except (KeyError, ValueError):
+                continue
+    recent = [v for w, v in points if as_of - timedelta(days=NEWS_DAYS) <= w < as_of]
+    before = [v for w, v in points if as_of - timedelta(days=NEWS_DAYS + TONE_BASE_DAYS) <= w < as_of - timedelta(days=NEWS_DAYS)]
+    if not recent:
+        return None
+    return {"recent": round(float(np.mean(recent)), 2),
+            "before": round(float(np.mean(before)), 2) if before else None}
+
+def build_stories(articles, embed_fn):
+    """Group headlines into stories: each headline joins the first story it is similar enough to."""
+    stories = []
+    for a in articles:
+        v = embed_fn(a["title"])
+        for s in stories:
+            c = s["sum"] / np.linalg.norm(s["sum"])
+            if float(c @ v) >= NEWS_STORY_SIM:
+                s["articles"].append(a)
+                s["sum"] = s["sum"] + v
+                break
+        else:
+            stories.append({"articles": [a], "sum": np.array(v, dtype=float)})
+    out = []
+    for s in stories:
+        if len(s["articles"]) >= NEWS_MIN_ARTICLES:
+            out.append({"articles": s["articles"], "first_seen": s["articles"][0]["seen"],
+                        "vec": s["sum"] / np.linalg.norm(s["sum"]),
+                        "domains": sorted({a["domain"] for a in s["articles"] if a["domain"]})})
+    return sorted(out, key=lambda s: -len(s["articles"]))
+
+def tone_text(tone):
+    if not tone:
+        return ""
+    before = f", against {tone['before']:+.1f} in the {TONE_BASE_DAYS} days before" if tone["before"] is not None else ""
+    return f"Average news tone about the company over the last {NEWS_DAYS} days: {tone['recent']:+.1f}{before} (negative = unfavourable)."
+
+def apply_news(index, candidates, stories, ticker, company, tone):
+    """Same-story rule. Stories close in time and meaning to a candidate filing become coverage of it
+    (returned as {candidate id: coverage}); the others become news items (largest first, at most NEWS_MAX_STORIES)."""
+    news_items, linked = [], {}
+    for k, s in enumerate(stories):
+        match = None
+        for c in candidates:
+            acc = datetime.fromisoformat(c["accepted"])
+            close_in_time = abs((s["first_seen"] - acc).total_seconds()) <= NEWS_LINK_DAYS * 86400
+            if close_in_time and float(index.emb[c["row"]] @ s["vec"]) >= NEWS_LINK_SIM:
+                match = c
+                break
+        heads = [a["title"] for a in s["articles"][:5]]
+        if match is not None and match["id"] not in linked:
+            linked[match["id"]] = {"articles": len(s["articles"]), "headlines": heads[:3], "tone": tone}
+        elif len(news_items) < NEWS_MAX_STORIES:
+            day = s["first_seen"].date()
+            news_items.append({
+                "id": f"{ticker}-NEWS-{day}-{k}", "ticker": ticker, "company": company, "form": "News",
+                "section": f"Headlines ({len(s['articles'])} articles: {', '.join(s['domains'][:3])})",
+                "section_key": "news", "event": "news", "accepted": s["first_seen"].isoformat(),
+                "filing": f"news-{ticker}-{day}-{k}", "url": s["articles"][0]["url"],
+                "text": " | ".join(heads), "vec": s["vec"], "score": len(s["articles"]),
+                "news": {"articles": len(s["articles"]), "headlines": heads[:3], "tone": tone}})
+    return news_items, linked
+
+#%% code
+NEWS_CACHE_FILE = "gdelt_cache.json"
+try:
+    NEWS_CACHE = json.load(open(NEWS_CACHE_FILE))
+except (FileNotFoundError, json.JSONDecodeError):
+    NEWS_CACHE = {}
+_last_call = [0.0]
+
+def gdelt(params):
+    """One GDELT DOC API call, cached on disk and spaced 5 seconds apart, as GDELT asks."""
+    key = json.dumps(params, sort_keys=True)
+    if key in NEWS_CACHE:
+        return NEWS_CACHE[key]
+    payload = {}
+    for attempt in range(2):
+        wait = 5.5 - (time.time() - _last_call[0])
+        if wait > 0:
+            time.sleep(wait)
+        _last_call[0] = time.time()
+        try:
+            r = requests.get("https://api.gdeltproject.org/api/v2/doc/doc", params=params, timeout=60)
+            payload = r.json() if r.text.strip().startswith("{") else {}
+            break
+        except Exception as e:
+            print("  GDELT error:", e)
+    NEWS_CACHE[key] = payload
+    json.dump(NEWS_CACHE, open(NEWS_CACHE_FILE, "w"))
+    return payload
+
+def fetch_news(ticker, company, as_of):
+    q = news_query(company, ticker)
+    fmt = "%Y%m%d%H%M%S"
+    arts = gdelt({"query": q, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
+                  "startdatetime": (as_of - timedelta(days=NEWS_DAYS)).strftime(fmt),
+                  "enddatetime": as_of.strftime(fmt)})
+    tone = gdelt({"query": q, "mode": "timelinetone", "format": "json",
+                  "startdatetime": (as_of - timedelta(days=NEWS_DAYS + TONE_BASE_DAYS)).strftime(fmt),
+                  "enddatetime": as_of.strftime(fmt)})
+    return arts, tone
+
+NEWS_FN = fetch_news if NEWS_ENABLED else None
+print("News search names:", {t: news_name(NAMES[t], t) for t in TICKERS})
 
 #%% md
 ## 6. Prices, buckets and the baseline
@@ -755,7 +922,9 @@ def previous_filing_rows(index, item):
     return [i for i in rows if index.chunks[i]["filing"] == prev_filing], prev_filing
 
 def novelty(index, item):
-    """(novelty 0-1, previous filing id or None)."""
+    """(novelty 0-1, previous filing id or None). News items get a neutral value."""
+    if item.get("form") == "News":
+        return NEWS_NOVELTY, None
     rows, prev = previous_filing_rows(index, item)
     if not rows:
         return 1.0, None
@@ -871,6 +1040,11 @@ def item_message(item, as_of, reaction=None):
     days = (as_of.date() - datetime.fromisoformat(item["accepted"]).date()).days
     msg = (f"Company: {item['company']} ({item['ticker']}). Forecast date: {as_of.date()}.\n"
            f"{item['form']} | {item['section']} | filed {item['accepted'][:10]} ({days} days before the forecast date)\n")
+    news = item.get("news")
+    if news:
+        msg += (f"News coverage: {news['articles']} articles, e.g. " + "; ".join(f'"{h}"' for h in news["headlines"]) + ".\n")
+        if news.get("tone"):
+            msg += tone_text(news["tone"]) + "\n"
     if reaction:
         msg += (f"Market reaction since then: the stock moved {100 * reaction['abnormal_return']:+.1f}% against the "
                 f"S&P 500 over {reaction['days']} trading day(s) ({reaction['bucket']}).\n")
@@ -935,7 +1109,7 @@ Everything is cached, so the beam search, the comparisons and the settings sweep
 def prepare_items(model, items, as_of, case, index, p0=None):
     prepared = []
     for item in items[:MAX_DEPTH]:
-        item = dict(item, vec=index.emb[item["row"]])          # used by the same-story check
+        item = dict(item, vec=item["vec"] if "vec" in item else index.emb[item["row"]])   # same-story check
         lag = (as_of.date() - datetime.fromisoformat(item["accepted"]).date()).days
         nov, prev = novelty(index, item)
         reaction = case.reaction(item["ticker"], datetime.fromisoformat(item["accepted"]), lag) \
@@ -957,7 +1131,8 @@ def prepare_items(model, items, as_of, case, index, p0=None):
                 ok, _ = grounded(model, item, r)
                 if not ok:
                     r["ok"], r["why"] = False, "failed grounding"
-            br, detail = case.score(r["effect"], r["size"], item["event"], lag, as_of, p0,
+            event_type = "*" if item["event"] == "news" else item["event"]          # no past news in case memory
+            br, detail = case.score(r["effect"], r["size"], event_type, lag, as_of, p0,
                                     reaction_bucket=reaction["bucket"] if reaction else None)
             r["base_rate"], r["n_events"] = br, detail.get("n_events")
             r["novelty"] = reading_novelty(r["effect"], nov)
@@ -1131,7 +1306,8 @@ def forecast_dates(filings, start, end, days_after=None):
 def brier(probs, outcome):
     return sum((probs[k] / 100 - (1.0 if k == outcome else 0.0)) ** 2 for k in OUTCOMES)
 
-def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, company=None, branch_log=None):
+def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, company=None, branch_log=None,
+                 news_fn=None):
     company = company or ticker
     fid = f"{ticker}-{as_of.date()}"
     t0 = time.time()
@@ -1139,7 +1315,17 @@ def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, com
     since = as_of - timedelta(days=FRESH_DAYS)
     searches = [search_index(index, embed_fn(q), ticker, as_of, since=since) for q in QUERIES]
     filings_in_window = filing_candidates(index, ticker, as_of, since, embed_fn)
-    evidence = select_evidence(index, searches + [filings_in_window])
+    news_items, linked, articles, tone = [], {}, [], None
+    if news_fn is not None:
+        art_payload, tone_payload = news_fn(ticker, company, as_of)
+        articles, tone = parse_articles(art_payload, as_of), tone_shift(tone_payload, as_of)
+        articles = [a for a in articles if a["seen"] >= as_of - timedelta(days=NEWS_DAYS)]
+        stories = build_stories(articles, embed_fn)
+        pool = {r["id"]: r for res in searches + [filings_in_window] for r in res["results"]}
+        news_items, linked = apply_news(index, list(pool.values()), stories, ticker, company, tone)
+    evidence = select_evidence(index, searches + [filings_in_window], k=min(K_FINAL, MAX_DEPTH) - len(news_items))
+    evidence = [dict(e, news=linked[e["id"]]) if e["id"] in linked else e for e in evidence]
+    evidence = sorted(evidence + news_items, key=lambda r: r["accepted"], reverse=True)
     in_window = sum(1 for i, c in enumerate(index.chunks)
                     if c["ticker"] == ticker and since <= index.accepted[i] < as_of)
     model = Model(chat_fn)
@@ -1167,6 +1353,8 @@ def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, com
         "search_check": {"chunks in window": in_window, "filings in window": len(filings_in_window["results"]),
                          **{f"best score: {q[:30]}": (max(r["score"] for r in s["results"]) if s["results"] else s["status"])
                             for q, s in zip(QUERIES, searches)}},
+        "news_check": {"articles": len(articles), "news items": len(news_items), "stories linked to filings": len(linked),
+                       "tone": tone},
         "prepared": prepared, "base": base,
         "variants": {"baseline": base, "prompt only": po, "single pass": single["final"],
                      "ToT beam 1": tot1["final"], "ToT beam 3": tot3["final"]},
@@ -1396,7 +1584,7 @@ for t in TICKERS:
     print(f"{t}: " + ", ".join(f"{sc} {sum(s == sc for _, s in plan)}" for sc in SCENARIOS))
     for as_of, sc in plan:
         rec = run_forecast(t, as_of, CHAT, INDEX, CASE, PRICES[t], FILINGS[t], embed_query,
-                           company=NAMES[t], branch_log=BRANCH_LOG)
+                           company=NAMES[t], branch_log=BRANCH_LOG, news_fn=NEWS_FN)
         rec["scenario"] = sc
         RECORDS.append(rec)
         print(f"  {rec['id']} [{sc}]: {len(rec['prepared'])} items, {rec['calls_tot']} calls, "
@@ -1503,6 +1691,17 @@ for title, group in (("Least new", low), ("Most new", high)):
         print(f"\nnovelty {ex['novelty']} (similarity {ex['similarity']})")
         print("  THIS:    ", ex["passage"])
         print("  PREVIOUS:", ex["closest in previous filing"])
+
+#%% md
+### Diagnostic: news coverage
+
+How many GDELT articles each forecast got, how many became news items, and how many were linked to a filing by the same-story rule, by year. Years with no articles mean GDELT's search does not reach that far back.
+
+#%% code
+nc = pd.DataFrame([{"forecast": r["id"], "year": r["as_of"].year, "scenario": r.get("scenario", ""),
+                    **{k: v for k, v in r["news_check"].items() if k != "tone"}} for r in RECORDS])
+display(nc.groupby("year")[["articles", "news items", "stories linked to filings"]].agg(["mean", "sum"]))
+display(nc.groupby("scenario")[["articles", "news items", "stories linked to filings"]].mean().round(1))
 
 #%% md
 ### 5. Does it fit the budget?
