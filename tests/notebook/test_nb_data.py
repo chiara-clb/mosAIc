@@ -157,3 +157,10 @@ def test_results_dates_finds_item_202():
             {"form": "8-K", "items": "5.02", "acceptanceDateTime": "2026-06-01T20:30:00.000Z"},
             {"form": "10-Q", "items": "", "acceptanceDateTime": "2026-07-31T20:30:00.000Z"}]
     assert ns["results_dates"](rows) == [dt("2026-07-30T20:30:00")]
+
+
+def test_results_dates_skip_interim_updates():
+    rows = [{"form": "8-K", "items": "2.02", "acceptanceDateTime": "2025-04-08T21:00:00.000Z"},   # interim update
+            {"form": "8-K", "items": "2.02,9.01", "acceptanceDateTime": "2025-05-02T21:00:00.000Z"},
+            {"form": "10-Q", "items": "", "acceptanceDateTime": "2025-05-07T21:00:00.000Z"}]
+    assert ns["results_dates"](rows) == [dt("2025-05-02T21:00:00")]
