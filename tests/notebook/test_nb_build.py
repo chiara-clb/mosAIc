@@ -45,7 +45,8 @@ def test_settings_match_the_design():
     assert (ns["BEAM_WIDTH"], ns["PRUNE_MARGIN"], ns["MAX_DEPTH"], ns["MAX_MODEL_CALLS"]) == (3, 0.3, 5, 25)
     assert ns["STRENGTH_POINTS"] == {"small": 3, "medium": 6, "large": 9}
     assert ns["MAX_TOTAL_SHIFT"] == 15
-    assert (ns["K_CANDIDATES"], ns["K_FINAL"], ns["MMR_LAMBDA"], ns["MIN_SCORE"]) == (20, 5, 0.7, 0.30)
+    assert (ns["K_CANDIDATES"], ns["K_FINAL"], ns["MMR_LAMBDA"]) == (20, 5, 0.7)
+    assert ns["MIN_SCORE"] == 0.20 and ns["FILING_MIN_SCORE"] < ns["MIN_SCORE"]   # lowered after the scenario run
     assert len(ns["CASE_TICKERS"]) == 30 and set(ns["TICKERS"]) <= set(ns["CASE_TICKERS"])
     assert abs(sum(ns["WEIGHTS"].values()) - 1) < 1e-9
 

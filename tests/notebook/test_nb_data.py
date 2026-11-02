@@ -164,3 +164,39 @@ def test_results_dates_skip_interim_updates():
             {"form": "8-K", "items": "2.02,9.01", "acceptanceDateTime": "2025-05-02T21:00:00.000Z"},
             {"form": "10-Q", "items": "", "acceptanceDateTime": "2025-05-07T21:00:00.000Z"}]
     assert ns["results_dates"](rows) == [dt("2025-05-02T21:00:00")]
+
+
+# ---------- every recent filing is a candidate ----------
+
+def test_boilerplate_is_recognised():
+    assert ns["is_boilerplate"]("SIGNATURE Pursuant to the requirements of the Securities Exchange Act of 1934 ...")
+    assert not ns["is_boilerplate"]("On May 1 the Board appointed Jane Doe as Chief Financial Officer.")
+
+
+def test_reference_text_follows_the_filing_subject():
+    assert ns["reference_text"](chunk("a", form="8-K", event="8-K 5.02")).startswith("Departure of Directors")
+    assert ns["reference_text"](chunk("a", form="10-Q", event="10-Q")) == ns["REPORT_TOPICS"]
+    assert ns["reference_text"](chunk("a", form="8-K", event="8-K 9.99")) == "company announcement"
+
+
+def test_one_candidate_per_filing_in_the_window():
+    cfo = "On May 1 the Board appointed Jane Doe as Chief Financial Officer."
+    chunks = [chunk("a1", form="8-K", event="8-K 5.02", filing="E1", accepted="2026-07-20", text=cfo),
+              chunk("a2", form="8-K", event="8-K 5.02", filing="E1", accepted="2026-07-20",
+                    text="SIGNATURE Pursuant to the requirements of the Securities Exchange Act"),
+              chunk("b1", form="10-Q", event="10-Q", filing="Q1", accepted="2026-07-25", text="Revenue grew."),
+              chunk("old", form="8-K", event="8-K 5.02", filing="E0", accepted="2026-05-01", text=cfo),
+              chunk("late", form="8-K", event="8-K 5.02", filing="E9", accepted="2026-08-02", text=cfo)]
+    idx = ns["Index"](chunks, np.array([unit(1, 0), unit(1, 0), unit(0, 1), unit(1, 0), unit(1, 0)], dtype=np.float32))
+    ref = {ns["REPORT_TOPICS"]: unit(0, 1)}
+    res = ns["filing_candidates"](idx, "AAPL", dt("2026-08-01"), dt("2026-07-02"), lambda s: ref.get(s, unit(1, 0)))
+    assert sorted(r["id"] for r in res["results"]) == ["a1", "b1"]
+
+
+def test_filing_candidates_rescue_evidence_the_searches_miss():
+    cfo = chunk("a1", form="8-K", event="8-K 5.02", filing="E1", accepted="2026-07-20", text="New CFO appointed.")
+    idx = ns["Index"]([cfo], np.array([unit(0.15, 0.989)], dtype=np.float32))
+    search = ns["search_index"](idx, unit(1, 0), "AAPL", dt("2026-08-01"))
+    assert search["results"] == []                               # below the search cut-off
+    filings = ns["filing_candidates"](idx, "AAPL", dt("2026-08-01"), dt("2026-07-02"), lambda s: unit(0.15, 0.989))
+    assert ns["select_evidence"](idx, [search, filings])[0]["id"] == "a1"

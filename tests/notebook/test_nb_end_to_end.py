@@ -16,6 +16,21 @@ RNG = np.random.default_rng(7)
 QUERY_VEC = {q: v / np.linalg.norm(v) for q, v in zip(ns["QUERIES"], RNG.normal(size=(3, DIM)))}
 
 
+def fake_embed(text):
+    """Stand-in embedder: the three searches and the filing subjects map to their topic vectors."""
+    if text in QUERY_VEC:
+        return QUERY_VEC[text]
+    q = list(QUERY_VEC.values())
+    if text.startswith("Results of Operations"):
+        return q[0]
+    if text == ns["REPORT_TOPICS"]:
+        return q[1]
+    if text.startswith("Departure of Directors"):
+        return q[2]
+    v = np.random.default_rng(abs(hash(text)) % 2**32).normal(size=DIM)
+    return v / np.linalg.norm(v)
+
+
 def near(v, noise=0.6):
     w = v + RNG.normal(scale=noise, size=DIM) / np.sqrt(DIM)
     return w / np.linalg.norm(w)
@@ -76,7 +91,7 @@ def run(tmp_path_factory):
     plan = ns["scenario_dates"](filings, px.index, "2025-01-01", "2026-09-25")
     records = []
     for d, sc in plan:
-        rec = ns["run_forecast"]("XYZ", d, fake_chat, index, case, px, filings, QUERY_VEC.__getitem__,
+        rec = ns["run_forecast"]("XYZ", d, fake_chat, index, case, px, filings, fake_embed,
                                  company="XYZ Corp", branch_log=str(log))
         rec["scenario"] = sc
         records.append(rec)
@@ -185,3 +200,10 @@ def test_novelty_examples_pair_passages_with_previous_filing():
     assert len(low) == 1 and high == []
     assert "new wording" in low[0]["passage"] and "old wording" in low[0]["closest in previous filing"]
     assert low[0]["similarity"] == pytest.approx(0.9, abs=0.01)
+
+
+def test_event_forecasts_find_their_filing(run):
+    records, _, _ = run
+    events = [r for r in records if r["scenario"] == "event"]
+    assert events and all(len(r["evidence"]) >= 1 for r in events)
+    assert all(any(e["id"].startswith("XYZ-8-K") for e in r["evidence"]) for r in events)

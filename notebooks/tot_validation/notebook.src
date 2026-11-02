@@ -69,7 +69,10 @@ FORMS = {"10-Q", "10-K", "8-K"}
 CHUNK_WORDS, OVERLAP_WORDS = 150, 30
 EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 FRESH_DAYS = 30
-K_CANDIDATES, K_FINAL, MMR_LAMBDA, MIN_SCORE = 20, 5, 0.7, 0.30
+K_CANDIDATES, K_FINAL, MMR_LAMBDA = 20, 5, 0.7
+MIN_SCORE = 0.20          # searches: below this best score, "nothing relevant found" (0.30 in Checkpoint 3
+                          # discarded most real evidence in the first scenario run; to tune on labelled examples)
+FILING_MIN_SCORE = 0.10   # every recent filing is a candidate; only near-empty passages fall below this
 QUERIES = [                       # fixed searches, in place of the ReAct loop
     "quarterly results revenue and guidance outlook",
     "legal proceedings, investigations and major risks",
@@ -342,7 +345,56 @@ The research step runs three searches, each returning up to 5 passages, but ToT 
 
 The five are then ordered newest first, which is the order the tree reads them in.
 
+**Every recent filing is a candidate.** The scenario run showed the searches alone lose most of the evidence: in 81 of 114 forecasts the company's filings from the last 30 days were there, but all three searches scored them just under the cut-off, so nothing was kept. Event 8-Ks are short and use formal titles ("Departure of Directors or Certain Officers") that the fixed searches do not match. Within 30 days one stock usually has only one to four filings, so each one now enters the pool directly: from each filing, the passage closest in meaning to the filing's own item title (or, for a 10-Q or 10-K, to the main topics of a report), skipping signature pages and form boilerplate. The three searches stay as an extra source for long reports.
+
 #%% core
+ITEM_TITLES = {
+    "1.01": "Entry into a Material Definitive Agreement",
+    "1.02": "Termination of a Material Definitive Agreement",
+    "1.05": "Material Cybersecurity Incidents",
+    "2.01": "Completion of Acquisition or Disposition of Assets",
+    "2.02": "Results of Operations and Financial Condition, quarterly results, revenue and outlook",
+    "2.03": "Creation of a Direct Financial Obligation",
+    "2.05": "Costs Associated with Exit or Disposal Activities, restructuring",
+    "2.06": "Material Impairments",
+    "5.02": "Departure of Directors or Certain Officers; Election of Directors; Appointment of Certain Officers",
+    "5.07": "Submission of Matters to a Vote of Security Holders",
+    "7.01": "Regulation FD Disclosure",
+    "8.01": "Other Events",
+}
+REPORT_TOPICS = "results of operations, outlook and guidance, risk factors, legal proceedings"
+
+BOILERPLATE = re.compile(
+    r"pursuant to the requirements of the securities exchange act|check the appropriate box|"
+    r"securities registered pursuant to section 12|cover page interactive data|inline xbrl|"
+    r"indicate by check mark|exhibit index|forward-looking statements", re.I)
+
+def is_boilerplate(text):
+    return bool(BOILERPLATE.search(text))
+
+def reference_text(chunk):
+    if chunk["form"] in ("10-Q", "10-K"):
+        return REPORT_TOPICS
+    code = chunk["event"].replace("8-K ", "")
+    return ITEM_TITLES.get(code, "company announcement")
+
+def filing_candidates(index, ticker, as_of, since, embed_fn):
+    """One passage per filing in the window: the one closest to the filing's own subject."""
+    by_filing = {}
+    for i, c in enumerate(index.chunks):
+        if c["ticker"] == ticker and since <= index.accepted[i] < as_of and not is_boilerplate(c["text"]):
+            by_filing.setdefault(c["filing"], []).append(i)
+    out, refs = [], {}
+    for filing, rows in by_filing.items():
+        ref = reference_text(index.chunks[rows[0]])
+        if ref not in refs:
+            refs[ref] = embed_fn(ref)
+        sims = index.emb[rows] @ refs[ref]
+        j = int(np.argmax(sims))
+        if sims[j] >= FILING_MIN_SCORE:
+            out.append({**index.chunks[rows[j]], "row": int(rows[j]), "score": round(float(sims[j]), 3)})
+    return {"status": "ok" if out else "no filings in this date range", "results": out}
+
 def select_evidence(index, results_by_query, k=None, lam=None):
     k = k or min(K_FINAL, MAX_DEPTH)
     lam = MMR_LAMBDA if lam is None else lam
@@ -989,7 +1041,8 @@ def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, com
     base, info = baseline_probabilities(px, as_of, results_dates(filings))
     since = as_of - timedelta(days=FRESH_DAYS)
     searches = [search_index(index, embed_fn(q), ticker, as_of, since=since) for q in QUERIES]
-    evidence = select_evidence(index, searches)
+    filings_in_window = filing_candidates(index, ticker, as_of, since, embed_fn)
+    evidence = select_evidence(index, searches + [filings_in_window])
     in_window = sum(1 for i, c in enumerate(index.chunks)
                     if c["ticker"] == ticker and since <= index.accepted[i] < as_of)
     model = Model(chat_fn)
@@ -1014,7 +1067,7 @@ def run_forecast(ticker, as_of, chat_fn, index, case, px, filings, embed_fn, com
     return {
         "id": fid, "ticker": ticker, "as_of": as_of, "outcome": outcome, "baseline_info": info,
         "evidence": [{k: e[k] for k in ("id", "form", "section", "accepted", "score", "text")} for e in evidence],
-        "search_check": {"chunks in window": in_window,
+        "search_check": {"chunks in window": in_window, "filings in window": len(filings_in_window["results"]),
                          **{f"best score: {q[:30]}": (max(r["score"] for r in s["results"]) if s["results"] else s["status"])
                             for q, s in zip(QUERIES, searches)}},
         "prepared": prepared, "base": base,
