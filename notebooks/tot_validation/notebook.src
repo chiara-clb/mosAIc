@@ -79,6 +79,11 @@ QUERIES = [                       # fixed searches, in place of the ReAct loop
     "acquisitions, agreements, restructuring and management changes",
 ]
 
+# Baseline (the baseline comparison notebook chose version C)
+BASELINE_VERSION = "C"     # "C": results days left out, blended with the past year; "A": the earlier baseline
+EWMA_DECAY = 0.94
+BLEND_RECENT = 0.5
+
 # Ledger (Checkpoint 1.1 and 4)
 STRENGTH_POINTS = {"small": 3, "medium": 6, "large": 9}
 MAX_TOTAL_SHIFT = 15      # points per outcome
@@ -419,7 +424,9 @@ def select_evidence(index, results_by_query, k=None, lam=None):
 #%% md
 ## 6. Prices, buckets and the baseline
 
-Reused from Checkpoint 3. The forecast date means the start of that day, so only closes on earlier days are known. A "large" move is more than half of the stock's typical monthly move over the past year (σ, one year of daily log returns scaled to 21 days). The baseline uses recent volatility, plus the typical earnings-day jump when the next results are likely within the month.
+The forecast date means the start of that day, so only closes on earlier days are known. A "large" move is more than half of the stock's typical monthly move over the past year (σ, one year of daily log returns scaled to 21 days).
+
+**The baseline is now version C**, the winner of the baseline comparison notebook (16,800 weekly forecasts for all 30 stocks): recent daily moves with results days left out, mixed half and half with the past year, plus the typical results-day jump when the next results are likely within the month. The earlier baseline (version A) counted the results-day jump as "the stock is jumpy right now" for weeks after each announcement. Set `BASELINE_VERSION = "A"` to rerun with it.
 
 #%% core
 def prices_before(px, as_of):
@@ -456,21 +463,49 @@ def typical_earnings_move(px, dates):
             moves.append(abs(math.log(after_px.iloc[0] / before_px.iloc[-1])))
     return float(np.mean(moves)) if moves else None
 
-def baseline_probabilities(px, as_of, results_dates):
-    """Fall / flat / gain in percent, from prices and the earnings calendar only."""
-    info = {}
+def results_day_mask(dates, results_times):
+    """True for the trading days that carried a results announcement's price move.
+
+    A filing made at or after 20:00 UTC (after the US close) moves the stock the next trading day.
+    """
+    days = np.array(pd.DatetimeIndex(dates).values, dtype="datetime64[D]")
+    mask = np.zeros(len(days), dtype=bool)
+    for a in results_times:
+        side = "right" if a.hour >= 20 else "left"
+        k = int(np.searchsorted(days, np.datetime64(a.date(), "D"), side=side))
+        if k < len(days):
+            mask[k] = True
+    return mask
+
+def baseline_probabilities(px, as_of, results_dates, version=None):
+    """Fall / flat / gain in percent, from prices and the earnings calendar only.
+
+    Version C (default, the winner of the baseline comparison): recent moves with results days left out,
+    mixed half and half with the past year (also without results days), plus the typical results-day
+    move when the next results are expected within the month. Version A is the earlier baseline.
+    """
+    version = version or BASELINE_VERSION
+    info = {"version": version}
     try:
         past = prices_before(px, as_of)
         r = np.diff(np.log(past.to_numpy(dtype=float)))[-SIGMA_LOOKBACK:]
         th = thresholds(px, as_of)
-        w = 0.94 ** np.arange(len(r))[::-1]                       # recent days weigh more
-        var_month = float(np.sum(w * r ** 2) / np.sum(w)) * HORIZON
+        w = EWMA_DECAY ** np.arange(len(r))[::-1]                  # recent days weigh more
         past_results = sorted(d for d in results_dates if d < as_of)
-        if past_results and as_of < past_results[-1] + timedelta(days=91) <= as_of + timedelta(days=30):
+        if version == "A":
+            var_month = float(np.sum(w * r ** 2) / np.sum(w)) * HORIZON
             move = typical_earnings_move(px, past_results)
-            if move:
-                var_month += move ** 2
-                info["earnings_move"] = round(move, 4)
+        else:
+            on_results = results_day_mask(past.index, past_results)[1:][-SIGMA_LOOKBACK:]
+            keep = ~on_results
+            recent = float(np.sum(w[keep] * r[keep] ** 2) / np.sum(w[keep]))
+            year = float(np.mean(r[keep] ** 2))
+            var_month = (BLEND_RECENT * recent + (1 - BLEND_RECENT) * year) * HORIZON
+            moves = np.abs(r[on_results])[-4:]
+            move = float(np.mean(moves)) if len(moves) else None
+        if past_results and as_of < past_results[-1] + timedelta(days=91) <= as_of + timedelta(days=30) and move:
+            var_month += move ** 2
+            info["earnings_move"] = round(move, 4)
         info["earnings_in_window"] = "earnings_move" in info
         s = math.sqrt(var_month)
         fall, gain = norm.cdf(th["lower"] / s), 1 - norm.cdf(th["upper"] / s)

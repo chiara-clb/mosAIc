@@ -200,3 +200,34 @@ def test_filing_candidates_rescue_evidence_the_searches_miss():
     assert search["results"] == []                               # below the search cut-off
     filings = ns["filing_candidates"](idx, "AAPL", dt("2026-08-01"), dt("2026-07-02"), lambda s: unit(0.15, 0.989))
     assert ns["select_evidence"](idx, [search, filings])[0]["id"] == "a1"
+
+
+# ---------- baseline version C ----------
+
+def _jumpy_after_results():
+    px = prices(n=700, daily_sigma=0.01, seed=3)
+    j = 600
+    px.iloc[j:] *= 1.12                                     # 12% results-day jump on day j
+    results = [px.index[j - 1].to_pydatetime().replace(tzinfo=dt("2026-01-01").tzinfo, hour=21)]
+    as_of = px.index[j + 2].to_pydatetime().replace(tzinfo=dt("2026-01-01").tzinfo)
+    return px, results, as_of
+
+
+def test_results_day_mask_uses_the_next_day_after_the_close():
+    px, results, _ = _jumpy_after_results()
+    mask = ns["results_day_mask"](px.index, results)
+    assert mask.sum() == 1 and mask[600]
+
+
+def test_version_c_is_not_fooled_by_the_results_day_jump():
+    px, results, as_of = _jumpy_after_results()
+    a, _ = ns["baseline_probabilities"](px, as_of, results, version="A")
+    c, info = ns["baseline_probabilities"](px, as_of, results, version="C")
+    assert info["version"] == "C"
+    assert c["flat"] > a["flat"] + 3
+    assert sum(c.values()) == pytest.approx(100, abs=0.05)
+
+
+def test_default_version_is_c():
+    px, results, as_of = _jumpy_after_results()
+    assert ns["baseline_probabilities"](px, as_of, results)[1]["version"] == "C"
