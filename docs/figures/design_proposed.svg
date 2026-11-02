@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="900" viewBox="0 0 1700 900" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#3a3f47"/>
+    </marker>
+    <marker id="arrRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b5442b"/>
+    </marker>
+    <marker id="arrGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a9099"/>
+    </marker>
+    <style>
+      .box { fill: #ffffff; stroke: #3a3f47; stroke-width: 1.6; }
+      .new { fill: #fff3df; stroke: #c27a12; stroke-width: 2; }
+      .mem { fill: #eef3fa; stroke: #4f6d94; stroke-width: 1.4; }
+      .eval { fill: #f4f4f4; stroke: #8a9099; stroke-width: 1.4; }
+      .t { font-size: 17px; font-weight: 700; fill: #1f2328; }
+      .s { font-size: 13.5px; fill: #3a3f47; }
+      .tag { font-size: 12px; fill: #6b7280; font-style: italic; }
+      .lbl { font-size: 12.5px; fill: #3a3f47; }
+      .red { font-size: 12.5px; fill: #b5442b; }
+      .line { stroke: #3a3f47; stroke-width: 1.6; fill: none; }
+      .grey { stroke: #8a9099; stroke-width: 1.4; fill: none; }
+      .loop { stroke: #b5442b; stroke-width: 1.6; fill: none; stroke-dasharray: 6 4; }
+      .node { fill: #ffffff; stroke: #c27a12; stroke-width: 1.6; }
+      .kept { fill: #c27a12; stroke: #c27a12; }
+      .pruned { fill: #ffffff; stroke: #b9bec6; stroke-width: 1.4; stroke-dasharray: 3 3; }
+      .prop { fill: #e9f6ee; stroke: #2e7d4f; stroke-width: 2; stroke-dasharray: 6 3; }
+      .grn { font-size: 13.5px; fill: #2e7d4f; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="1700" height="900" fill="#ffffff"/>
+
+  <!-- ===== Agents ===== -->
+  <text x="20" y="28" class="tag">Agent roles (CrewAI)</text>
+
+  <rect x="20" y="150" width="135" height="70" rx="8" class="box"/>
+  <text x="87" y="180" text-anchor="middle" class="t">Request</text>
+  <text x="87" y="200" text-anchor="middle" class="s">stock + date</text>
+
+  <rect x="180" y="140" width="170" height="90" rx="8" class="box"/>
+  <text x="265" y="172" text-anchor="middle" class="t">Coordinator</text>
+  <text x="265" y="193" text-anchor="middle" class="s">earnings within</text>
+  <text x="265" y="211" text-anchor="middle" class="s">the month?</text>
+
+  <rect x="400" y="55" width="200" height="85" rx="8" class="box"/>
+  <text x="500" y="87" text-anchor="middle" class="t">Quant agent</text>
+  <text x="500" y="108" text-anchor="middle" class="s">baseline from prices,</text>
+  <text x="500" y="126" text-anchor="middle" class="s">calculated in code</text>
+
+  <rect x="400" y="190" width="200" height="135" rx="8" class="box"/>
+  <text x="500" y="220" text-anchor="middle" class="t">Research agents</text>
+  <text x="500" y="240" text-anchor="middle" class="s">ReAct loop:</text>
+  <text x="500" y="258" text-anchor="middle" class="s">think → search → observe</text>
+  <text x="500" y="280" text-anchor="middle" class="s">filings (SEC) and</text>
+  <text x="500" y="297" text-anchor="middle" class="grn">news headlines + tone</text>
+  <text x="500" y="315" text-anchor="middle" class="red">empty result → rephrase</text>
+
+  <!-- Synthesis with ToT -->
+  <rect x="840" y="40" width="345" height="290" rx="10" class="new"/>
+  <text x="1012" y="66" text-anchor="middle" class="t">Synthesis agent: Tree of Thought</text>
+  <text x="1012" y="84" text-anchor="middle" class="tag">new in Checkpoint 4 (LangChain)</text>
+
+  <!-- tree -->
+  <line x1="1012" y1="118" x2="912" y2="160" class="grey"/>
+  <line x1="1012" y1="118" x2="1012" y2="160" class="grey"/>
+  <line x1="1012" y1="118" x2="1112" y2="160" class="grey"/>
+  <rect x="972" y="98" width="80" height="24" rx="5" class="node"/>
+  <text x="1012" y="115" text-anchor="middle" class="lbl">baseline</text>
+
+  <rect x="872" y="160" width="80" height="24" rx="5" class="node"/>
+  <text x="912" y="177" text-anchor="middle" class="lbl">fall</text>
+  <rect x="972" y="160" width="80" height="24" rx="5" class="node"/>
+  <text x="1012" y="177" text-anchor="middle" class="lbl">wider spread</text>
+  <rect x="1072" y="160" width="80" height="24" rx="5" class="node"/>
+  <text x="1112" y="177" text-anchor="middle" class="lbl">no effect</text>
+
+  <!-- level 2: 6 children, 3 kept -->
+  <line x1="912" y1="184" x2="890" y2="222" class="grey"/>
+  <line x1="912" y1="184" x2="934" y2="222" class="grey"/>
+  <line x1="1012" y1="184" x2="990" y2="222" class="grey"/>
+  <line x1="1012" y1="184" x2="1034" y2="222" class="grey"/>
+  <line x1="1112" y1="184" x2="1090" y2="222" class="grey"/>
+  <line x1="1112" y1="184" x2="1134" y2="222" class="grey"/>
+  <circle cx="890" cy="230" r="8" class="pruned"/>
+  <circle cx="934" cy="230" r="8" class="kept"/>
+  <circle cx="990" cy="230" r="8" class="pruned"/>
+  <circle cx="1034" cy="230" r="8" class="pruned"/>
+  <circle cx="1090" cy="230" r="8" class="kept"/>
+  <circle cx="1134" cy="230" r="8" class="kept"/>
+  <text x="1012" y="262" text-anchor="middle" class="s">filled = kept in the beam of 3, dashed = pruned</text>
+  <text x="1012" y="284" text-anchor="middle" class="s">3 readings per item, one level per item (max 5)</text>
+  <text x="1012" y="314" text-anchor="middle" class="t" style="font-size:15px">→ best complete ledger</text>
+
+  <rect x="1220" y="140" width="175" height="90" rx="8" class="box"/>
+  <text x="1307" y="172" text-anchor="middle" class="t">Critic</text>
+  <text x="1307" y="193" text-anchor="middle" class="s">checks sources, dates</text>
+  <text x="1307" y="211" text-anchor="middle" class="s">and arithmetic</text>
+
+  <rect x="1435" y="115" width="240" height="140" rx="8" class="box"/>
+  <text x="1555" y="146" text-anchor="middle" class="t">Forecast</text>
+  <text x="1555" y="170" text-anchor="middle" class="s">fall / flat / gain</text>
+  <text x="1555" y="190" text-anchor="middle" class="s">= baseline + ledger,</text>
+  <text x="1555" y="210" text-anchor="middle" class="s">one cited line per</text>
+  <text x="1555" y="230" text-anchor="middle" class="s">piece of evidence</text>
+
+  <rect x="1435" y="295" width="240" height="75" rx="8" class="box"/>
+  <text x="1555" y="324" text-anchor="middle" class="t">Analyst</text>
+  <text x="1555" y="346" text-anchor="middle" class="s">strikes, resizes or adds lines</text>
+
+  <!-- agent arrows -->
+  <line x1="155" y1="185" x2="178" y2="185" class="line" marker-end="url(#arr)"/>
+  <polyline points="350,170 365,170 365,97 398,97" class="line" marker-end="url(#arr)"/>
+  <polyline points="350,200 365,200 365,255 398,255" class="line" marker-end="url(#arr)"/>
+  <line x1="600" y1="97" x2="838" y2="97" class="line" marker-end="url(#arr)"/>
+  <line x1="600" y1="255" x2="638" y2="255" class="line" marker-end="url(#arr)"/>
+  <line x1="810" y1="255" x2="838" y2="255" class="line" marker-end="url(#arr)"/>
+  <line x1="1185" y1="185" x2="1218" y2="185" class="line" marker-end="url(#arr)"/>
+  <line x1="1395" y1="185" x2="1433" y2="185" class="line" marker-end="url(#arr)"/>
+  <line x1="1540" y1="293" x2="1540" y2="257" class="line" marker-end="url(#arr)"/>
+  <text x="1548" y="281" class="lbl">recompute</text>
+
+  <!-- critic failure loop -->
+  <polyline points="1260,230 1260,385 560,385 560,322" class="loop" marker-end="url(#arrRed)"/>
+
+
+  <!-- ===== Proposed: same-story check and news index ===== -->
+  <rect x="640" y="150" width="170" height="160" rx="8" class="prop"/>
+  <text x="725" y="178" text-anchor="middle" class="t">Same-story check</text>
+  <text x="725" y="200" text-anchor="middle" class="s">groups each news item</text>
+  <text x="725" y="218" text-anchor="middle" class="s">with the filing it</text>
+  <text x="725" y="236" text-anchor="middle" class="s">reports on; adds the</text>
+  <text x="725" y="254" text-anchor="middle" class="s">price reaction since;</text>
+  <text x="725" y="272" text-anchor="middle" class="s">one ledger line</text>
+  <text x="725" y="290" text-anchor="middle" class="s">per story</text>
+
+  <rect x="645" y="460" width="180" height="125" rx="8" class="prop"/>
+  <text x="735" y="490" text-anchor="middle" class="t">News index</text>
+  <text x="735" y="513" text-anchor="middle" class="s">GDELT headlines,</text>
+  <text x="735" y="531" text-anchor="middle" class="s">tone and volume,</text>
+  <text x="735" y="549" text-anchor="middle" class="s">dated, free</text>
+  <polyline points="585,327 585,440 735,440 735,458" class="line" marker-end="url(#arr)" marker-start="url(#arr)"/>
+
+  <!-- ===== Tools and memory ===== -->
+  <rect x="160" y="425" width="1275" height="245" rx="12" fill="none" stroke="#4f6d94" stroke-width="1.4" stroke-dasharray="7 5"/>
+  <text x="180" y="626" class="t" style="fill:#4f6d94">Tools and memory</text>
+  <text x="180" y="648" class="s">Every tool returns only data published before the forecast date. Document index, news index, case memory and branch log are served by MCP.</text>
+
+  <rect x="185" y="460" width="210" height="125" rx="8" class="mem"/>
+  <text x="290" y="490" text-anchor="middle" class="t">Market data</text>
+  <text x="290" y="513" text-anchor="middle" class="s">daily prices,</text>
+  <text x="290" y="531" text-anchor="middle" class="s">earnings dates,</text>
+  <text x="290" y="549" text-anchor="middle" class="grn">S&amp;P 500 index</text>
+
+  <rect x="410" y="460" width="215" height="125" rx="8" class="mem"/>
+  <text x="517" y="490" text-anchor="middle" class="t">Document index</text>
+  <text x="517" y="513" text-anchor="middle" class="s">SEC filings</text>
+  <text x="517" y="531" text-anchor="middle" class="s">last 30 days,</text>
+  <text x="517" y="549" text-anchor="middle" class="s">20 closest → 5 by MMR</text>
+
+  <rect x="840" y="460" width="185" height="125" rx="8" class="mem"/>
+  <text x="932" y="490" text-anchor="middle" class="t">Case memory</text>
+  <text x="932" y="513" text-anchor="middle" class="s">what similar past</text>
+  <text x="932" y="531" text-anchor="middle" class="s">events did next,</text>
+  <text x="932" y="549" text-anchor="middle" class="s">by event type</text>
+  <text x="932" y="567" text-anchor="middle" class="grn">and price reaction</text>
+
+  <rect x="1045" y="460" width="170" height="125" rx="8" class="new"/>
+  <text x="1130" y="490" text-anchor="middle" class="t">Branch log</text>
+  <text x="1130" y="513" text-anchor="middle" class="s">every tree node,</text>
+  <text x="1130" y="531" text-anchor="middle" class="s">pruned ones too</text>
+
+  <rect x="1235" y="460" width="180" height="125" rx="8" class="mem"/>
+  <text x="1325" y="490" text-anchor="middle" class="t">Reflection notes</text>
+  <text x="1325" y="513" text-anchor="middle" class="s">lessons from rejected</text>
+  <text x="1325" y="531" text-anchor="middle" class="s">ledgers, read at the</text>
+  <text x="1325" y="549" text-anchor="middle" class="s">start of each forecast</text>
+
+  <!-- tool arrows -->
+  <line x1="265" y1="232" x2="265" y2="458" class="line" marker-end="url(#arr)" marker-start="url(#arr)"/>
+  <polyline points="400,125 386,125 386,458" class="line" marker-end="url(#arr)"/>
+  <line x1="470" y1="322" x2="470" y2="458" class="line" marker-end="url(#arr)" marker-start="url(#arr)"/>
+  <line x1="932" y1="332" x2="932" y2="458" class="line" marker-end="url(#arr)" marker-start="url(#arr)"/>
+  <line x1="1130" y1="332" x2="1130" y2="458" class="line" marker-end="url(#arr)"/>
+  <line x1="1350" y1="232" x2="1350" y2="458" class="line" marker-end="url(#arr)"/>
+
+  <!-- ===== Evaluation only ===== -->
+  <rect x="160" y="705" width="1515" height="175" rx="12" class="eval" stroke-dasharray="7 5"/>
+  <text x="180" y="733" class="t" style="fill:#5b616b">Evaluation only: never seen by the agent</text>
+
+  <rect x="185" y="755" width="220" height="100" rx="8" fill="#ffffff" stroke="#8a9099" stroke-width="1.4"/>
+  <text x="295" y="791" text-anchor="middle" class="t">Option prices</text>
+  <text x="295" y="814" text-anchor="middle" class="s">on the forecast date</text>
+
+  <rect x="470" y="755" width="280" height="100" rx="8" fill="#ffffff" stroke="#8a9099" stroke-width="1.4"/>
+  <text x="610" y="791" text-anchor="middle" class="t">Answer key</text>
+  <text x="610" y="814" text-anchor="middle" class="s">market's implied fall / flat / gain</text>
+
+  <rect x="1015" y="755" width="400" height="100" rx="8" fill="#ffffff" stroke="#8a9099" stroke-width="1.4"/>
+  <text x="1215" y="787" text-anchor="middle" class="t">Scoring</text>
+  <text x="1215" y="810" text-anchor="middle" class="s">main: log loss against the answer key</text>
+  <text x="1215" y="830" text-anchor="middle" class="s">secondary: Brier score against what happened</text>
+
+  <line x1="405" y1="805" x2="468" y2="805" class="grey" marker-end="url(#arrGrey)"/>
+  <line x1="750" y1="805" x2="1013" y2="805" class="grey" marker-end="url(#arrGrey)"/>
+  <polyline points="1675,185 1690,185 1690,805 1417,805" class="grey" marker-end="url(#arrGrey)"/>
+  <text x="1500" y="797" class="lbl" style="fill:#5b616b">forecast, after it is logged</text>
+
+  <!-- legend -->
+  <rect x="1455" y="430" width="18" height="14" rx="3" class="new"/>
+  <text x="1480" y="442" class="lbl">new in Checkpoint 4</text>
+  <rect x="1455" y="456" width="18" height="14" rx="3" class="prop"/>
+  <text x="1480" y="468" class="lbl">proposed next</text>
+  <line x1="1455" y1="494" x2="1490" y2="494" class="loop"/>
+  <text x="1498" y="498" class="lbl">feedback loop</text>
+  <rect x="612" y="365" width="596" height="18" fill="#ffffff"/>
+  <text x="910" y="378" text-anchor="middle" class="red">check fails: back to research or synthesis (at most twice), then report the baseline</text>
+</svg>
