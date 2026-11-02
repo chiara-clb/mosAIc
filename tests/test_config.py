@@ -33,7 +33,7 @@ def test_retrieval_values_match_checkpoint_3():
     assert s.embed_model.endswith("all-MiniLM-L6-v2")
     assert (s.fresh_days, s.k_candidates, s.k_final) == (30, 20, 5)
     assert s.mmr_lambda == 0.7
-    assert s.min_score == 0.30
+    assert s.min_score == 0.20 and s.filing_min_score < s.min_score   # design review 5.2
 
 
 def test_ledger_and_tot_values_match_design():
@@ -43,6 +43,18 @@ def test_ledger_and_tot_values_match_design():
     assert (s.beam_width, s.readings_per_item, s.max_depth, s.max_model_calls) == (3, 3, 5, 25)
     assert s.prune_margin == 0.3
     assert s.critic_retries == 2
+
+
+def test_lessons_from_the_validation_notebooks():
+    s = SETTINGS
+    assert s.baseline_version == "C" and s.blend_recent == 0.5 and s.ewma_decay == 0.94
+    assert s.results_max_gap_days == 75 and s.after_close_utc_hour == 20
+    assert s.novelty_sim_range == (0.5, 0.95)
+    assert len(s.reaction_labels) == len(s.reaction_edges) + 1 and s.market_ticker == "SPY"
+    assert (s.news_days, s.news_max_stories, s.news_link_days) == (14, 2, 3)
+    assert s.keep_no_effect_min_beam == 2
+    assert set(s.scenarios) == {"event", "after results", "results coming", "mid-quarter", "random"}
+    assert not s.use_vol_ratio                         # open until the option data is loaded
 
 
 def test_decided_options():

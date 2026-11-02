@@ -1,6 +1,6 @@
 # MosAIc build plan
 
-Build the application from the full design, checked part by part against the initial goal in `docs/design_review.md`. Each step is one small commit containing the feature and its tests. Nothing is pushed without asking first.
+Build the application from the full design, checked part by part against the initial goal in `docs/design_review.md`, including the lessons from the validation notebooks (its section 5). Each step is one small commit containing the feature and its tests. Nothing is pushed without asking first.
 
 ## Choices
 
@@ -26,21 +26,22 @@ Build the application from the full design, checked part by part against the ini
 | --- | --- | --- |
 | 4 | `trace.py`: JSONL trace and leakage audit | Planted late source is caught |
 | 5 | `edgar.py`: download, clean, sections, chunks, answer-key leakage filter | Fixture filings; sentences quoting implied moves dropped |
-| 6 | `index.py`: embeddings, date-filtered search, MMR, "nothing found"; `select_evidence`: pool all search results, keep the best passage per filing, MMR to 5 using each passage's best score across the searches (design review 3.8) | Hand-made vectors: no late chunks, MMR drops near-copies, threshold; evidence selection keeps one passage per filing and returns at most 5 |
-| 7 | `prices.py` and `coordinator.py`: price loader, results dates from 8-K item 2.02, earnings-in-window estimate | Window edges; no later data |
-| 8 | `baseline.py`: EWMA (GARCH optional), earnings-move mix, optional frozen ratio, fallback | Steady volatility gives about 31/38/31; earnings widens both tails |
-| 9 | `ledger.py`: fall, gain, wider spread, no effect; cap; floors | Each line sums to zero; cap scales all lines together |
-| 10 | `novelty.py`: compare with the same section of the previous filing | Repeated wording low, new wording high |
-| 11 | `case_memory.py`: event base rates from 8-K items and prices; past-ledger table | Synthetic events give the expected rates; only earlier events used |
+| 6 | `index.py`: embeddings, date-filtered search, MMR, "nothing found" at 0.20 (a setting); boilerplate filter; every filing in the 30-day window as a candidate (passage closest to its item title); `select_evidence`: pool searches and filing candidates, best passage per filing, MMR to 5 (design review 3.8, 5.2) | Hand-made vectors: no late chunks, MMR drops near-copies, threshold; short 8-Ks missed by the searches are still found; one passage per filing, at most 5 |
+| 7 | `prices.py` and `coordinator.py`: price loader (stocks and the S&P 500 fund), results dates from 8-K item 2.02 kept one per quarter (last before each 10-Q / 10-K), results-day rule (after 20:00 UTC = next day), earnings-in-window estimate, warning for stocks with too few results dates (XOM) | Window edges; no later data; interim updates skipped; after-close filings move the next day |
+| 8 | `baseline.py`: version C (recent moves without results days, blended half and half with the past year), results-day jump when results are due, version E option (root mean square of the last 8 jumps), optional frozen ratio, fallback (design review 5.1) | Steady volatility gives about 31/38/31; a fresh results-day jump does not inflate C; earnings widens both tails; E vs C on synthetic jumps |
+| 9 | `ledger.py`: fall, gain, wider spread, no effect; cap; a 1% floor that holds after rescaling | Each line sums to zero; cap scales all lines together; floor holds |
+| 10 | `novelty.py`: compare with the same section (matched by title) of the previous filing; similarity rescaled between 0.5 and 0.95; neutral for news | Repeated wording low, new wording high; 10-K counts as previous report for a 10-Q |
+| 11 | `case_memory.py`: event base rates from 8-K items and prices, at the same delay; price reaction against the S&P 500 and base rates conditioned on it; "any event" rates for news; past-ledger table | Synthetic events give the expected rates; only windows ended before the forecast date; drift after big falls found; market-wide moves are not company reactions |
+| 11b | `news.py`: GDELT client (cached, 5-second spacing), headline parsing with the answer-key leakage filter, stories, tone shift, same-story rule (design review 5.3) | Fake GDELT replies: later and option-related headlines dropped; stories need 2 articles; coverage linked to a filing within 3 days; at most 2 news items |
 
 ### C. The agent
 
 | # | Commit | Tests |
 | --- | --- | --- |
 | 12 | `llm.py`: chat model factory and structured output with a JSON fallback | Stand-in model; messy JSON parsed |
-| 13 | `research.py`: ReAct loop with LangChain tools; agent sees headers and cleaned extracts only; reflection notes in the prompt | Scripted model: step limit, repeated queries, empty results; planted instruction text never reaches the agent |
+| 13 | `research.py`: ReAct loop with LangChain tools over filings and news; agent sees headers and cleaned extracts only; reflection notes in the prompt | Scripted model: step limit, repeated queries, empty results; planted instruction text never reaches the agent |
 | 14 | `mcp_servers/`: case memory, document index, branch log | In-memory MCP client calls each tool |
-| 15 | `tot.py`: beam search synthesis; every node serialised as a JSON record (id, parent, readings, scores) in the branch log | Node records round-trip through the branch log; beam of 3; all-"no effect" ledger kept; grounding and date failures pruned; 0.3 rule; ties to smaller shift; 25-call budget; baseline if nothing survives |
+| 15 | `tot.py`: beam search synthesis; generator sees each passage with its price reaction, news coverage and tone; every node serialised as a JSON record (id, parent, readings, scores) in the branch log | Node records round-trip through the branch log; beam of 3; all-"no effect" ledger kept (only with 2+ slots); grounding and date failures pruned; 0.3 rule; ties to smaller shift; 25-call budget |
 | 16 | `critic.py` and `reflection.py`: final checks, entailment check, notes | Each rejection rule; notes written and read back |
 | 17 | `pipeline.py` and `crew.py`: run_forecast with retries and baseline fallback; run record with model version and seed; CrewAI roles | Fakes end to end; leakage audit clean; CrewAI test skips if not installed |
 
@@ -48,17 +49,19 @@ Build the application from the full design, checked part by part against the ini
 
 | # | Commit | Tests |
 | --- | --- | --- |
-| 18 | `evaluate.py`: baselines (normal prior, price-only, prompt-only, no retrieval, no ToT) and ablations, including a sweep over the ToT settings the class lesson names (beam width, pruning margin, depth limit); `forward_log.py` with hashes | Each baseline runs on fakes; edited record fails the hash |
+| 18 | `evaluate.py`: baselines (fixed guess, price-only, prompt-only with its average-answer check, no retrieval, no news, no ToT) and ablations, a sweep over beam width, pruning margin and depth, search vs scoring errors; five test scenarios (after results, mid-quarter, results coming, event days, random weeks) reported separately; `forward_log.py` with hashes | Each baseline runs on fakes; scenario dates as specified; edited record fails the hash |
 | 19 | Streamlit app: forecast, ledger, tree, trace, audit; interactive mode (strike, resize, add lines, plain-language assumptions); implied probabilities shown only after the forecast | UI helpers; AppTest smoke test when installed |
 | 20 | README: setup, API keys, Colab, building the index, running tests | — |
 
 ## Decisions (from the design review)
 
 1. **Answer key** (3.1): decided. The calculation is built now against a standard option-chain format and tested on synthetic chains. The data provider is chosen later, then a loader is added.
-2. **Baseline** (3.2): open. Frozen implied-to-realised ratio on or off; EWMA or GARCH. Blocks step 8 only.
+2. **Baseline** (3.2, 5.1): decided, version C; version E to test. The option-based correction ratio stays open until the FirstRate data is loaded.
 3. **Prompt injection guard** (3.3): decided, option A. The research agent sees each result's header, score and a cleaned extract of about 40 words; full passages go only to the synthesis step, which has no tools.
 4. **Metrics** (3.4): decided. Main metric is log loss against the implied probabilities, with total variation distance alongside; Brier score against outcomes is secondary. ToT weights are tuned on the main metric, on dates kept apart from the test dates. Checkpoint 4 needs one sentence changed to match.
 5. **The 30 stocks:** proposed list in `mosaic/config.py` (about 3 per sector; AAPL, NKE and INTC kept from the checkpoint runs).
+6. **Market information** (5.3): decided. Price reaction in case memory, then GDELT news (free) with the same-story rule.
+7. **Option data:** FirstRate Data end-of-day files; a loader for them is added to the answer key once the file layout is known.
 
 ## Testing here vs on your machine
 
@@ -66,4 +69,4 @@ This workspace can't reach PyPI, SEC EDGAR, Yahoo Finance or Hugging Face, and L
 
 ## Later (not in this build)
 
-News API and GDELT, topic-based superseding, λ tuning on labelled queries, real earnings calendar. Experiments on choosing the five evidence items, compared with MMR on the same past dates: a reranking model (seen in class) and one passage per topic.
+Topic-based superseding, λ and search cut-off tuning on labelled queries, real earnings calendar, past news in case memory. Experiments on choosing the five evidence items, compared with MMR on the same past dates: a reranking model (seen in class) and one passage per topic.

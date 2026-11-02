@@ -47,7 +47,7 @@ Status: **built** = working in the notebook; **partly** = a simpler version exis
 
 ## 3. Where the documents disagree or leave a gap
 
-Each item has a recommendation. Decisions so far: 3.1, 3.3, 3.4 and 3.8 decided; 3.2 still open; 3.5 to 3.7 and 3.9 follow the recommendations unless revisited.
+Each item has a recommendation. Decisions so far: 3.1, 3.3, 3.4 and 3.8 decided; 3.2 decided for the volatility part (version C) with the option-based ratio still open; 3.5 to 3.7 and 3.9 follow the recommendations unless revisited. Section 5 adds what the validation notebooks taught.
 
 ### 3.1 The answer key has no data source yet
 
@@ -59,7 +59,9 @@ Each item has a recommendation. Decisions so far: 3.1, 3.3, 3.4 and 3.8 decided;
 
 **Issue:** the full design scales the price-based volatility by a frozen implied-to-realised ratio per stock, estimated from 2020–2025 options. Checkpoints 1.1 and 2 and the working rules say option prices are never an input to the agent. The notebook leaves the ratio out.
 
-**Recommendation:** keep the ratio as an optional input, off by default, and report the price-only baseline both with and without it. The ratio is fixed before the test window, so it does not reveal any test date's answer, but the submissions should state it openly. Also choose between GARCH (full design) and EWMA (notebook). I suggest EWMA first, since it has no fitting step that can fail, with GARCH as an option.
+**Recommendation:** keep the ratio as an optional input, off by default, and report the price-only baseline both with and without it. The ratio is fixed before the test window, so it does not reveal any test date's answer, but the submissions should state it openly.
+
+**Decision on the volatility part (November 2026):** version C from the baseline comparison (section 5.1). GARCH is not needed. The ratio stays open until the FirstRate option data is loaded; it can then be measured on 2020–2024 and tested both ways.
 
 ### 3.3 Raw passages reach the research agent, which can call tools
 
@@ -97,10 +99,12 @@ Each item has a recommendation. Decisions so far: 3.1, 3.3, 3.4 and 3.8 decided;
 
 **Decision:** pool the passages from all searches, keep the best passage per filing, then run MMR to 5, using each passage's best score across the searches as its relevance. MMR decides which evidence goes in; ToT decides what it means. A reranking model and one passage per topic are later experiments, compared with MMR on the same past dates.
 
+**Updated (section 5.2):** every filing in the 30-day window also enters the pool directly, and news stories take up to 2 of the 5 places.
+
 ### 3.9 Smaller gaps
 
 - **Reflection notes** are written but never read; the pipeline will add the latest notes to the research prompt.
-- **News agent** is MVP in the full design but a second step in Checkpoint 3; this build adds the interface and the leakage filter, and the API comes later.
+- **News agent** is MVP in the full design but a second step in Checkpoint 3. Now decided (section 5.3): GDELT headlines and tone, free, in this build.
 - **Code sandbox**: the full design has the quant agent writing code, while the notebook runs fixed code. Fixed, tested code is safer and meets "all numbers computed in code", so the sandbox is dropped unless the course requires it.
 - **Model training cutoff**: with an API model, test dates before its cutoff may be remembered. The pinned model's cutoff goes in the run record, and later dates are reported separately.
 - **The ledger example** in the full design (buyback −2 / 0 / +2) is not on the 3/6/9 scale; the code uses the scale.
@@ -108,3 +112,51 @@ Each item has a recommendation. Decisions so far: 3.1, 3.3, 3.4 and 3.8 decided;
 ## 4. What this changes in the plan
 
 The build follows the full design's milestones instead of the notebook's order: forecast definition, answer key and scoring first, then the data and tools with as_of enforced, then the agent, then evaluation and the interface. The updated steps are in `PLAN.md`.
+
+## 5. Lessons from the validation notebooks (November 2026)
+
+The Tree of Thought validation notebook (21, then 114 forecasts) and the baseline comparison notebook (16,800 weekly forecasts, all 30 stocks) showed where the design fell short. Each lesson below is now a design decision for the final application; the numbers are in `docs/presentation_notes.md`.
+
+### 5.1 The baseline
+
+| Lesson | Decision for the application |
+| --- | --- |
+| A results-day jump made the old baseline (recent moves, last days weigh most) expect a jumpy month for weeks after every announcement, while the month after results is usually calm (44% flat, against 38% expected) | **Leave results days out of "recent moves"**; results count only through the separate results-day jump term |
+| Mixing recent moves half and half with the past year (also without results days) was the best version overall, and the old version was worse than a fixed 31 / 38 / 31 guess right after results | **Baseline = version C**: 0.5 × recent (weights 0.94 per day) + 0.5 × past year, results days left out |
+| A learned "calm-down after results" correction added nothing on top of C | **Not used** |
+| Every version expects too many flat months when the next results fall inside the month (34% actual, 37–40% predicted) | **Version E to test:** the results-day jump term uses the root mean square of the last 8 results-day moves instead of the average size; keep it only if it fixes this |
+| Some companies file item 2.02 for mid-quarter updates (Chevron, Nike, Tesla, Prologis); Exxon's results are missing from the SEC item list | **One results announcement per quarter** (the last 2.02 filing before each 10-Q or 10-K); a check for stocks with too few results dates; XOM to be fixed by hand if the SEC list stays incomplete |
+| Results filed after the close move the stock the next day | **Results-day rule:** filed at or after 20:00 UTC means next trading day |
+| Against actual outcomes, price history beats a fixed guess by only about 1%; the option-implied answer key should separate versions better | **Choose the final baseline again on the main metric** once the FirstRate data is loaded |
+
+### 5.2 Evidence from filings
+
+| Lesson | Decision |
+| --- | --- |
+| In 81 of 114 forecasts the filings were in the 30-day window but all searches scored them just under 0.30, so nothing was kept; event 8-Ks are short and formally worded | **Every filing in the window is a candidate**, with its passage closest to the filing's own item title (or the main report topics); searches stay as an extra source for long reports |
+| The 0.30 cut-off from Checkpoint 3 was never tested | **Search cut-off 0.20, as a setting**, to be tuned on labelled examples (presentation plan task) |
+| Signature pages and form text compete with real content | **Boilerplate filter** before candidates are chosen |
+| 10-Qs and 10-Ks number their items differently | **Match sections by title** for the novelty check |
+| Raw "1 − similarity" made almost every passage look repeated | **Novelty rescaled** between similarity 0.5 (new) and 0.95 (repeated); check the cut-offs by reading the side-by-side examples |
+| Between results, the stock often has no filing at all in 30 days | **News fills the gap** (5.3); with no evidence, ToT keeps the baseline |
+
+### 5.3 Market information and news
+
+| Lesson | Decision |
+| --- | --- |
+| Reading only the company's own documents gives a partial view of the market; the options market reacts to price moves, news and coverage too | **Market information is part of the evidence step**, with the order: price reaction first, news second |
+| The market's own verdict on a filing is how the stock moved since then | **Price reaction in case memory:** the move since the filing against the S&P 500, in typical daily moves, bucketed from big fall to big rise; base rates count past events of the same type *with the same reaction* over the same delay; the reaction is shown to the generator |
+| Free news with dates and tone exists; paid APIs are out of budget | **GDELT**: headlines from the 14 days before the forecast, grouped into stories (at least 2 articles), tone over 14 days against the 60 before; option-related headlines dropped (answer-key leakage); calls cached and spaced 5 seconds |
+| A filing and its press coverage are often the same story | **Same-story rule:** a story starting within 3 days of a filing and similar to it is coverage of that filing (shown next to it, no own line); other stories become news items, at most 2 per forecast |
+| Case memory has no history of past news | News items use base rates for **any event with the same price reaction**, and neutral novelty (0.5) |
+| GDELT's history may be limited (officially 3 months, older notes say 2017) | **Coverage check by year**; backtests report forecasts with and without news separately |
+
+### 5.4 Testing
+
+| Lesson | Decision |
+| --- | --- |
+| Forecasts only two days after results test one calm phase with one kind of evidence | **Five test scenarios** in every evaluation: after results, mid-quarter, results coming, event days, random weeks; results reported per scenario |
+| The beam-of-1 comparison was broken by the "keep the no-effect node" rule | **Keep that node only when the beam has at least 2 slots** |
+| The 1% floor could end below 1% after rescaling (Checkpoint 3 code) | **Floor that holds after rescaling** |
+| ToT beat the first reading but not the baseline; the search breadth never mattered with 1–2 items per forecast | Keep beam 3; **report search errors and scoring errors separately**; revisit the beam once forecasts have more evidence |
+| The prompt-only model scored well where the agent had no evidence | **Prompt-only stays a baseline**, tested on the large sample with a "model's average answer" check |

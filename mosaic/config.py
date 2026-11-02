@@ -47,14 +47,19 @@ class Settings:
     k_candidates: int = 20
     k_final: int = 5
     mmr_lambda: float = 0.7
-    min_score: float = 0.30           # below this best cosine score: "nothing relevant found"
+    min_score: float = 0.20           # searches: "nothing relevant found" below this (0.30 lost most evidence; design review 5.2)
+    filing_min_score: float = 0.10    # every filing in the window is a candidate; only near-empty passages fall below
     research_extract_words: int = 40  # design review 3.3: research agent sees header + short cleaned extract
 
     # --- Coordinator and baseline (full design §4, notebook) ---
     earnings_gap_days: int = 91       # next results estimated this long after the last (design review 3.7)
+    results_max_gap_days: int = 75    # results = last item-2.02 filing within 75 days before each 10-Q / 10-K
+    after_close_utc_hour: int = 20    # filed at or after this hour moves the stock the next trading day
+    baseline_version: str = "C"       # design review 5.1: results days left out, blended with the past year
     ewma_decay: float = 0.94
-    vol_model: str = "ewma"           # "ewma" or "garch" -- design review 3.2, still open
-    use_vol_ratio: bool = False       # frozen implied-to-realised ratio -- design review 3.2, still open
+    blend_recent: float = 0.5         # weight on recent moves; the rest on the past year
+    results_jump_last: int = 4        # results-day moves averaged for the jump term (version E: 8, root mean square)
+    use_vol_ratio: bool = False       # frozen implied-to-realised ratio -- design review 3.2, open until option data
 
     # --- Agent (Checkpoint 2, notebook) ---
     max_research_steps: int = 4
@@ -63,16 +68,35 @@ class Settings:
     max_total_shift: float = 15.0     # points, per outcome
     min_probability: float = 1.0      # percent; every outcome stays possible
 
+    # --- Novelty (design review 5.2) ---
+    novelty_sim_range: tuple[float, float] = (0.5, 0.95)   # similarity to the previous filing: new .. repeated
+
+    # --- Market information (design review 5.3) ---
+    market_ticker: str = "SPY"                       # S&P 500 fund, to separate company news from market moves
+    reaction_edges: tuple[float, ...] = (-2.0, -0.5, 0.5, 2.0)   # in typical daily moves since the filing
+    reaction_labels: tuple[str, ...] = ("big fall", "fall", "small", "rise", "big rise")
+    news_days: int = 14                              # GDELT headlines before the forecast date
+    tone_base_days: int = 60
+    news_story_sim: float = 0.6
+    news_min_articles: int = 2
+    news_max_stories: int = 2                        # news items per forecast; filings fill the rest up to 5
+    news_link_days: int = 3                          # same-story rule: a story this close to a filing...
+    news_link_sim: float = 0.35                      # ...and this similar is coverage of it
+    news_novelty: float = 0.5
+    gdelt_spacing_seconds: float = 5.0
+
     # --- Tree of Thought (Checkpoint 4) ---
     beam_width: int = 3
     readings_per_item: int = 3
     max_depth: int = 5
     max_model_calls: int = 25
     prune_margin: float = 0.3         # drop nodes more than this below the best
+    keep_no_effect_min_beam: int = 2  # the all-"no effect" node is guaranteed only with 2+ slots
 
     # --- Evaluation (design review 3.4) ---
     main_metric: str = "log_loss_implied"
     tuning_metric: str = "log_loss_implied"
+    scenarios: tuple[str, ...] = ("event", "after results", "results coming", "mid-quarter", "random")   # design review 5.4
 
     # --- LLM (pluggable; API default) ---
     llm_provider: str = field(default_factory=lambda: os.environ.get("MOSAIC_LLM_PROVIDER", "anthropic"))
