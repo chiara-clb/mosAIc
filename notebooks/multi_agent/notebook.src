@@ -230,3 +230,150 @@ def truth_of(world, item_id):
     raise KeyError(item_id)
 
 WORLD = make_world()
+
+#%% md
+## 4. Tools behind one MCP-style interface
+
+Agents never call a tool function directly. They go through `mcp_call(tool, caller=...)`, which stands in for an MCP client and does three things in one place:
+
+1. **Checks the caller's role.** A tool not in the caller's role card is refused, so synthesis cannot search even if the model asks to.
+2. **Applies the forecast date.** Every tool returns only data published before the start of the forecast day.
+3. **Logs and fails visibly.** Every call is logged. A tool can be switched off to test failures, and then it raises an error instead of returning an empty result.
+
+The search tools score passages by word overlap (cosine similarity of word counts). That is enough for a handful of synthetic filings; the real system uses embeddings.
+
+Search results for the research agent hold a header, a score and a cleaned extract of about 40 words. Sentences that look like instructions to an AI are removed from the extract and the header says so. The full passage stays in the index.
+
+#%% core
+class ToolError(RuntimeError):
+    """A tool failed (or was switched off); the caller must handle it."""
+
+class RoleError(PermissionError):
+    """An agent asked for a tool that is not in its role card."""
+
+INJECTION_PATTERNS = [r"ignore (all )?(your )?previous instructions", r"note to ai", r"you are an ai",
+                      r"call \w+ with", r"system prompt"]
+STOPWORDS = set("the a an and or of to in on for with by is are was were be been its it this that as at from "
+                "not has have had any will which under into than other".split())
+
+CTX = {}                                   # the current forecast run: world, logs, model, switched-off tools
+
+def new_run(world=None, script=None, failures=(), model=None):
+    """Start a fresh run context. Every tool and agent reads it."""
+    CTX.clear()
+    CTX.update(world=world or make_world(), script=dict(script or {}), failures=set(failures),
+               tool_log=[], branch_log=[], model=model)
+    return CTX
+
+def words(text):
+    return [w for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2 and w not in STOPWORDS]
+
+def similarity(a, b):
+    ca, cb = {}, {}
+    for w in words(a):
+        ca[w] = ca.get(w, 0) + 1
+    for w in words(b):
+        cb[w] = cb.get(w, 0) + 1
+    dot = sum(v * cb.get(k, 0) for k, v in ca.items())
+    na, nb = math.sqrt(sum(v * v for v in ca.values())), math.sqrt(sum(v * v for v in cb.values()))
+    return dot / (na * nb) if na and nb else 0.0
+
+def clean_extract(text, n_words=EXTRACT_WORDS):
+    """First n words of the text, with instruction-like sentences removed. Returns (extract, removed?)."""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    kept = [s for s in sentences if not any(re.search(p, s, re.I) for p in INJECTION_PATTERNS)]
+    ws = " ".join(kept).split()
+    return " ".join(ws[:n_words]) + (" ..." if len(ws) > n_words else ""), len(kept) < len(sentences)
+
+def published(item):
+    return item.get("filed") or item.get("first_seen")
+
+def _visible(item, since=None):
+    t = published(item)
+    return t < CTX["world"]["as_of"] and (since is None or t >= since)
+
+def _passage(item_id):
+    """Code-side lookup of a full passage (never a tool for the research model). None if not yet published."""
+    for it in CTX["world"]["filings"] + CTX["world"]["news"]:
+        if it["id"] == item_id:
+            return it if _visible(it) else None
+    return None
+
+def tool_market_data(kind):
+    w = CTX["world"]
+    if kind == "prices":
+        p = w["prices"]
+        keep = [i for i, d in enumerate(p["dates"]) if d < w["as_of"]]
+        return {"dates": [p["dates"][i] for i in keep], "stock": [p[w["ticker"]][i] for i in keep],
+                "market": [p["SPY"][i] for i in keep]}
+    if kind == "earnings":
+        past = [d for d in w["earnings_dates"] if d < w["as_of"]]
+        last = max(past) if past else None
+        return {"last_results": last, "next_estimate": last + timedelta(days=91) if last else None}
+    raise ValueError(f"unknown market data {kind!r}")
+
+def tool_search_documents(query, k=K_FINAL):
+    w = CTX["world"]
+    since = w["as_of"] - timedelta(days=FRESH_DAYS)
+    hits = []
+    for f in w["filings"]:
+        if not _visible(f, since):
+            continue
+        score = similarity(query, f["section"] + " " + f["text"])
+        if score >= MIN_SCORE:
+            extract, removed = clean_extract(f["text"])
+            header = f"{f['form']} | {f['section']} | filed {f['filed']:%Y-%m-%d}"
+            hits.append({"id": f["id"], "kind": "filing", "header": header + (" | instruction-like text removed" if removed else ""),
+                         "score": round(score, 3), "extract": extract})
+    return sorted(hits, key=lambda h: -h["score"])[:k]
+
+def tool_search_news(query, k=K_FINAL, days=14):
+    w = CTX["world"]
+    since = w["as_of"] - timedelta(days=days)
+    hits = []
+    for s in w["news"]:
+        if not _visible(s, since):
+            continue
+        text = " | ".join(s["headlines"])
+        score = similarity(query, text)
+        if score >= MIN_SCORE:
+            hits.append({"id": s["id"], "kind": "news", "score": round(score, 3),
+                         "header": f"News | {len(s['headlines'])} articles | first seen {s['first_seen']:%Y-%m-%d} | tone {s['tone']:+.1f}",
+                         "extract": clean_extract(text)[0]})
+    return sorted(hits, key=lambda h: -h["score"])[:k]
+
+def tool_case_memory(event, reaction):
+    cm = CTX["world"]["case_memory"]
+    key = (event, reaction)
+    return dict(cm[key], matched=f"{event} / {reaction}") if key in cm else dict(cm["*"], matched="all events")
+
+def tool_branch_log(record):
+    CTX["branch_log"].append(record)
+    return len(CTX["branch_log"]) - 1
+
+def tool_get_passage(item_id):
+    it = _passage(item_id)
+    if it is None:
+        return None
+    return {"id": it["id"], "published": published(it),
+            "text": it["text"] if "text" in it else " | ".join(it["headlines"])}
+
+TOOLS = {"market_data": tool_market_data, "search_documents": tool_search_documents,
+         "search_news": tool_search_news, "case_memory": tool_case_memory,
+         "branch_log": tool_branch_log, "get_passage": tool_get_passage}
+
+def mcp_call(tool, caller, **kwargs):
+    """The single door to every tool: role check, forecast-date rule (inside each tool), logging, failures."""
+    entry = {"tool": tool, "caller": caller, "args": {k: v for k, v in kwargs.items() if k != "record"}}
+    if tool not in TOOLS:
+        CTX["tool_log"].append({**entry, "status": "unknown tool"})
+        raise ValueError(f"unknown tool {tool!r}")
+    if tool not in ROLES.get(caller, {}).get("tools", []):
+        CTX["tool_log"].append({**entry, "status": "refused: not in role"})
+        raise RoleError(f"{caller} may not use {tool}")
+    if tool in CTX["failures"]:
+        CTX["tool_log"].append({**entry, "status": "error"})
+        raise ToolError(f"{tool} is unavailable")
+    out = TOOLS[tool](**kwargs)
+    CTX["tool_log"].append({**entry, "status": "ok"})
+    return out
