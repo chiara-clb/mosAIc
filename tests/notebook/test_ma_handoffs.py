@@ -60,9 +60,9 @@ def test_scripted_research_follows_queries_then_news_then_finishes():
     for q in s["queries"]:
         a = scripted("research", {"observations": obs})
         assert (a["action"], a["query"]) == ("search_documents", q)
-        obs.append({"tool": "search_documents", "query": q, "results": [1]})
+        obs.append({"tool": "search_documents", "query": q, "results": [{"id": "x"}]})
     assert scripted("research", {"observations": obs})["action"] == "search_news"
-    obs.append({"tool": "search_news", "query": s["news_query"], "results": [1]})
+    obs.append({"tool": "search_news", "query": s["news_query"], "results": [{"id": "x"}]})
     assert scripted("research", {"observations": obs})["action"] == "finish"
 
 
