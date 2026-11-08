@@ -521,7 +521,7 @@ def scripted_research(p, s):
     last = p["observations"][-1] if p["observations"] else None
     if last and not last["results"] and last["query"] in s["rephrase"] and s["rephrase"][last["query"]] not in done:
         return {"thought": "Nothing found; rephrase.", "action": last["tool"], "query": s["rephrase"][last["query"]]}
-    if p.get("hints_given"):
+    if p.get("hints"):
         return {"thought": "Found what the critic asked for.", "action": "finish"}
     for q in s["queries"]:
         if q not in done:
@@ -551,3 +551,337 @@ def scripted_chat(messages, max_tokens=300):
     payload = json.loads(messages[-1]["content"].split("INPUT:\n", 1)[1])
     script = {**DEFAULT_SCRIPT, **CTX.get("script", {})}
     return json.dumps(SCRIPTED[agent](payload, script))
+
+#%% md
+## 6. The agents
+
+Each agent is one function that LangGraph will run as a node. It reads what it needs from the shared state and returns only the fields it changes. `as_node` wraps every agent so the run's trace records which node ran, how many model and tool calls it made, and a short note.
+
+- **Coordinator** (code): checks the earnings calendar (only the last results date and an estimate of the next one, never the real future date) and resets the retry counter.
+- **Quant** (code): baseline version C from the design: the volatility of recent moves blended half and half with the past year, the thresholds at ±0.5σ of the past year, and wider tails when results fall in the month.
+- **Research** (model + tools): a ReAct loop of up to 4 steps. The model picks the next search from what it has seen so far; an empty search is rephrased. If the critic sent it back, the critic's hint becomes the next search. Code then builds the handoff: it attaches the full passage (which the research model never saw), applies the same-story rule (a news story within 3 days of a filing it reports on becomes coverage of that filing) and keeps at most 5 items.
+- **Synthesis** (model, no search): Tree of Thought from Checkpoint 4. Two readings per item from the model plus "no effect" from code; each reading's quote is checked by the critic's model; base rates from case memory, including a measured rate for "no effect"; novelty; beam search with breadth 3. If the model asks for a tool while reading a passage, the request goes through `mcp_call` and is refused, because synthesis has no search tools.
+- **Critic** (code checks): every cited source exists, was published before the forecast date and contains the quoted words; news about a company event has its filing in the evidence; the probabilities add up and stay within the cap. A rejection carries the reasons and, for missing evidence, a hint for the next search.
+- **Finalise / fallback**: the accepted forecast, or the baseline with the reason it was used.
+
+#%% core
+class ForecastState(TypedDict, total=False):
+    request: dict                    # ticker, company, as_of
+    plan: dict                       # coordinator: results due within the month?
+    baseline: dict                   # quant
+    evidence: list                   # research
+    ledger: list                     # synthesis
+    forecast: dict                   # synthesis: baseline + ledger
+    tot: dict                        # synthesis: what the tree looked like
+    verdict: dict                    # critic
+    feedback: list                   # critic -> research / synthesis: reasons
+    hints: list                      # critic -> research: what to look for
+    retries: int
+    final: dict
+    error: Annotated[list, operator.add]     # quant and research run in parallel, so these
+    trace: Annotated[list, operator.add]     # two fields merge both nodes' writes
+
+OPTIONS = {"protocol": "two_way", "readings": "tot"}   # section 9 changes these
+
+def as_node(name, fn):
+    """Wrap an agent: run it, then add one trace line with its model and tool calls."""
+    def node(state):
+        m0 = CTX["model"].calls if CTX.get("model") else 0
+        t0 = len(CTX["tool_log"])
+        out = dict(fn(state) or {})
+        note = out.pop("_note", "")
+        calls = (CTX["model"].calls if CTX.get("model") else 0) - m0
+        out["trace"] = [{"node": name, "model_calls": calls, "tool_calls": len(CTX["tool_log"]) - t0, "note": note}]
+        return out
+    node.__name__ = name
+    return node
+
+def norm_cdf(x):
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+def floor_and_normalise(p):
+    """Scale to 100 while keeping every outcome at MIN_PROB or more (floors hold after rescaling)."""
+    floored = set()
+    while True:
+        free = [k for k in OUTCOMES if k not in floored]
+        room = 100.0 - MIN_PROB * len(floored)
+        s = sum(p[k] for k in free)
+        out = {k: (MIN_PROB if k in floored else (room * p[k] / s if s > 0 else room / len(free))) for k in OUTCOMES}
+        low = [k for k in free if out[k] < MIN_PROB]
+        if not low:
+            return {k: round(v, 2) for k, v in out.items()}
+        floored.update(low)
+
+def coordinator(state):
+    e = mcp_call("market_data", "coordinator", kind="earnings")
+    window_end = state["request"]["as_of"] + timedelta(days=round(HORIZON_DAYS * 7 / 5))
+    due = bool(e["next_estimate"] and state["request"]["as_of"] <= e["next_estimate"] <= window_end)
+    return {"plan": {"results_in_window": due, "next_results_estimate": e["next_estimate"]},
+            "retries": 0, "feedback": [], "hints": [],
+            "_note": f"results {'due' if due else 'not due'} within the month"}
+
+def quant(state):
+    try:
+        px = mcp_call("market_data", "quant", kind="prices")
+    except ToolError as exc:
+        return {"error": [f"quant: {exc}"], "_note": "market data unavailable"}
+    r = np.diff(np.log(np.array(px["stock"])))[-252:]
+    var_year = float(np.var(r))
+    ew = 0.0
+    for x in r:                                   # EWMA with decay 0.94
+        ew = 0.94 * ew + 0.06 * x * x
+    var_daily = 0.5 * ew + 0.5 * var_year         # version C blend
+    if state["plan"]["results_in_window"]:
+        var_daily *= 1.3                          # stand-in for the results-day jump
+    thr = BUCKET_K * math.sqrt(var_year * HORIZON_DAYS)
+    sd = math.sqrt(var_daily * HORIZON_DAYS)
+    fall = gain = 100 * norm_cdf(-thr / sd)
+    base = floor_and_normalise({"fall": fall, "flat": 100 - 2 * fall, "gain": gain})
+    return {"baseline": handoff("baseline", base), "_note": f"baseline {base}"}
+
+RESEARCH_TASK = ("Decide the next step. Reply {\"thought\": ..., \"action\": \"search_documents\" | \"search_news\" | "
+                 "\"finish\", \"query\": ...}. Search for events that could move the stock. If a search found "
+                 "nothing, rephrase it. If 'hints' is not empty, search for them first.")
+
+def topic_similarity(a, b):
+    """Similarity without the company's own name, which every passage shares."""
+    name = set(words(CTX["world"]["company"]))
+    strip = lambda t: " ".join(w for w in words(t) if w not in name)
+    return similarity(strip(a), strip(b))
+
+def same_story(items):
+    """News stories published within NEWS_LINK_DAYS of a filing they report on become coverage of that filing."""
+    filings = [i for i in items if i["kind"] == "filing"]
+    kept = []
+    for it in items:
+        if it["kind"] == "news":
+            match = next((f for f in filings
+                          if abs((it["published"] - f["published"]).total_seconds()) <= NEWS_LINK_DAYS * 86400
+                          and topic_similarity(it["full_text"], f["full_text"]) >= 0.2), None)
+            if match is not None:
+                match["coverage"].append({"id": it["id"], "headlines": it["full_text"]})
+                continue
+        kept.append(it)
+    return kept
+
+def research(state):
+    req = state["request"]
+    hints = list(state.get("hints") or [])
+    pool = {e["id"]: {**e, "coverage": []} for e in state.get("evidence") or []}
+    observations, notes = [], []
+    for _ in range(MAX_RESEARCH_STEPS):
+        payload = {"question": f"What new information could move {req['company']} ({req['ticker']}) "
+                               f"over the next {HORIZON_DAYS} trading days?",
+                   "forecast_date": req["as_of"].date(), "observations": observations, "hints": hints}
+        a = ask("research", RESEARCH_TASK, payload, 150) or {"action": "finish"}
+        if a.get("action") not in ("search_documents", "search_news"):
+            break
+        try:
+            hits = mcp_call(a["action"], "research", query=a.get("query", ""))
+        except ToolError as exc:
+            return {"error": [f"research: {exc}"], "_note": f"{a['action']} unavailable"}
+        observations.append({"tool": a["action"], "query": a.get("query", ""),
+                             "results": [{k: h[k] for k in ("id", "header", "score", "extract")} for h in hits]})
+        notes.append(f"{a['action']}('{a.get('query', '')}') -> {len(hits)}")
+        for h in hits:
+            if h["id"] not in pool or h["score"] > pool[h["id"]]["score"]:
+                full = _passage(h["id"])                       # code adds the full passage; the model never saw it
+                pool[h["id"]] = {**h, "published": published(full), "coverage": [],
+                                 "full_text": full.get("text") or " | ".join(full["headlines"]),
+                                 "event": full["event"], "reaction": full["reaction"], "novelty": full["novelty"]}
+    items = same_story(sorted(pool.values(), key=lambda e: -e["score"]))[:K_FINAL]
+    items = [handoff("evidence", e) for e in sorted(items, key=lambda e: e["published"], reverse=True)]
+    return {"evidence": items, "hints": [], "_note": "; ".join(notes) + f" => {[e['id'] for e in items]}"}
+
+#%% core
+SYNTHESIS_TASK = ("Give two different readings of this evidence item for the stock over the next month. Reply "
+                  "{\"readings\": [{\"effect\": \"fall\" | \"gain\" | \"spread\" | \"none\", \"size\": \"small\" | "
+                  "\"medium\" | \"large\", \"quote\": exact words from the passage, \"reason\": one sentence}, ...]}. "
+                  "'spread' means more likely to move a lot in either direction. If 'feedback' names this item, fix it.")
+JUDGE_TASK = "Does the passage contain the quote and support the claim? Reply {\"supported\": true | false}."
+
+NO_EFFECT = {"effect": "none", "size": None, "quote": "", "reason": "Already known or not material.", "ok": True}
+
+def shift_for(effect, size):
+    if effect == "none":
+        return {"fall": 0.0, "flat": 0.0, "gain": 0.0}
+    s = float(STRENGTH_POINTS[size])
+    return {"fall": {"fall": s, "flat": -s / 3, "gain": -2 * s / 3},
+            "gain": {"fall": -2 * s / 3, "flat": -s / 3, "gain": s},
+            "spread": {"fall": s / 2, "flat": -s, "gain": s / 2}}[effect]
+
+def apply_ledger(base, readings):
+    total = {k: sum(shift_for(r["effect"], r["size"])[k] for r in readings) for k in OUTCOMES}
+    biggest = max([abs(v) for v in total.values()] + [0.0])
+    factor = MAX_TOTAL_SHIFT / biggest if biggest > MAX_TOTAL_SHIFT else 1.0
+    return floor_and_normalise({k: max(base[k] + factor * total[k], 0.0) for k in OUTCOMES}), factor
+
+def readings_of(prepared, choice):
+    return [prepared[d]["readings"][i] for d, i in enumerate(choice)]
+
+def node_score(prepared, choice, base):
+    rs = readings_of(prepared, choice)
+    _, factor = apply_ledger(base, rs)
+    return WEIGHTS["reading"] * float(np.mean([r["score"] for r in rs])) + WEIGHTS["consistency"] * factor
+
+def total_shift(rs):
+    return sum(abs(v) for v in {k: sum(shift_for(r["effect"], r["size"])[k] for r in rs) for k in OUTCOMES}.values())
+
+def beam_search(prepared, base, width=BEAM_WIDTH, margin=PRUNE_MARGIN):
+    """ToT-BFS: keep the best `width` partial ledgers per level; drop nodes more than `margin` below the best."""
+    frontier, nodes = [()], []
+    for d, entry in enumerate(prepared):
+        children = []
+        for parent in frontier:
+            for i, r in enumerate(entry["readings"]):
+                n = {"choice": parent + (i,), "depth": d + 1, "status": "", "score": None}
+                nodes.append(n)
+                if not r["ok"]:
+                    n["status"] = "pruned: failed grounding"
+                    continue
+                n["score"] = node_score(prepared, n["choice"], base)
+                n["shift"] = total_shift(readings_of(prepared, n["choice"]))
+                children.append(n)
+        children.sort(key=lambda n: (-round(n["score"], 9), round(n["shift"], 9)))
+        kept = children[:width]
+        for n in children[width:]:
+            n["status"] = f"pruned: outside the top {width}"
+        for n in kept[1:]:
+            if n["score"] < kept[0]["score"] - margin:
+                n["status"] = f"pruned: more than {margin} below the best"
+        kept = [n for n in kept if not n["status"]]
+        if width >= 2:                             # the all-"no effect" node stays when there are 2+ slots
+            neutral = next((n for n in children if all(r["effect"] == "none" for r in readings_of(prepared, n["choice"]))), None)
+            if neutral is not None and neutral not in kept:
+                if len(kept) >= width:
+                    kept[-1]["status"] = "pruned: replaced by the no-effect node"
+                    kept = kept[:-1]
+                neutral["status"] = ""
+                kept.append(neutral)
+        for n in kept:
+            n["status"] = "kept"
+        frontier = [n["choice"] for n in kept] or frontier
+    best = min((n for n in nodes if n["status"] == "kept" and n["depth"] == len(prepared)),
+               key=lambda n: (-round(n["score"], 9), round(n["shift"], 9)), default=None)
+    if best:
+        best["status"] = "chosen"
+    return (best["choice"] if best else ()), nodes
+
+def read_item(item, feedback):
+    """Model readings of one item, plus "no effect"; each quote checked by the critic's model; base rate and novelty."""
+    payload = {"item": {"id": item["id"], "header": item["header"], "text": item["full_text"],
+                        "price_reaction": item["reaction"],
+                        "coverage": [c["headlines"] for c in item.get("coverage", [])]},
+               "feedback": feedback}
+    reply = ask("synthesis", SYNTHESIS_TASK, payload, 400) or {}
+    blocked = None
+    if isinstance(reply.get("tool_request"), dict):          # the model tried to act on something it read
+        req = reply["tool_request"]
+        try:
+            mcp_call(req.get("tool", ""), "synthesis", query=req.get("query", ""))
+        except (RoleError, ValueError) as exc:
+            blocked = str(exc)
+    readings = [dict(r) for r in reply.get("readings", [])[:2] if isinstance(r, dict) and not problems_reading(r)]
+    for r in readings:
+        if r["effect"] == "none":
+            r["ok"] = True
+            continue
+        v = ask("critic", JUDGE_TASK, {"passage": item["full_text"], "quote": r["quote"], "claim": r["reason"]}, 30) or {}
+        r["ok"] = bool(v.get("supported"))
+    readings.append(dict(NO_EFFECT))
+    cm = mcp_call("case_memory", "synthesis", event=item["event"], reaction=item["reaction"])
+    for r in readings:
+        r["source"] = item["id"]
+        r["base_rate"] = cm[r["effect"]]
+        r["novelty"] = item["novelty"] if r["effect"] != "none" else 1 - item["novelty"]
+        r["score"] = 0.5 * r["base_rate"] + 0.5 * r["novelty"]
+    return {"item": item["id"], "readings": readings, "blocked": blocked}
+
+def synthesis(state):
+    if state.get("error"):
+        return {"_note": "skipped: " + "; ".join(state["error"])}
+    base, feedback = state["baseline"], state.get("feedback") or []
+    prepared = [read_item(it, feedback) for it in state["evidence"][:K_FINAL]]
+    if OPTIONS["readings"] == "single":            # single pass: first reading that passed its check
+        choice = tuple(next(i for i, r in enumerate(p["readings"]) if r["ok"]) for p in prepared)
+        nodes = []
+    else:
+        choice, nodes = beam_search(prepared, base)
+    chosen = readings_of(prepared, choice)
+    mcp_call("branch_log", "synthesis", record={"nodes": len(nodes), "choice": choice,
+                                                "readings": [(r["source"], r["effect"], r["size"]) for r in chosen]})
+    final, _ = apply_ledger(base, chosen)
+    lines = [handoff("line", {"source": r["source"], "effect": r["effect"], "size": r["size"], "quote": r["quote"],
+                              "reason": r["reason"], "shift": shift_for(r["effect"], r["size"])})
+             for r in chosen if r["effect"] != "none"]
+    blocked = [p["blocked"] for p in prepared if p["blocked"]]
+    note = ", ".join(f"{r['source']}: {r['effect']}" + (f" {r['size']}" if r["size"] else "") for r in chosen)
+    return {"ledger": lines, "forecast": final,
+            "tot": {"nodes": len(nodes), "prepared": prepared, "choice": choice, "blocked": blocked},
+            "_note": note + (f" | blocked tool request: {blocked}" if blocked else "")}
+
+#%% core
+EVENT_WORDS = r"\b(resign\w*|step(s|ping)? down|appoint\w*|results|merger|acquir\w*|agreement|settle\w*)\b"
+
+def norm(text):
+    return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+
+def critic(state):
+    if state.get("error"):
+        return {"verdict": {"ok": False, "route": "fallback", "reasons": state["error"]}, "_note": "tool failure"}
+    evidence = {e["id"]: e for e in state["evidence"]}
+    reasons, hints, to_research = [], [], False
+    for e in evidence.values():                       # news about a company event needs its filing
+        if e["kind"] == "news" and re.search(EVENT_WORDS, e["full_text"], re.I):
+            near = [f for f in evidence.values() if f["kind"] == "filing"
+                    and abs((f["published"] - e["published"]).total_seconds()) <= NEWS_LINK_DAYS * 86400]
+            if not near:
+                headline = e["full_text"].split(" | ")[0]
+                reasons.append(f"{e['id']}: the news reports a company event ('{headline}') but the filing "
+                               f"behind it is not in the evidence")
+                hints.append(headline)
+                to_research = True
+    for l in state.get("ledger") or []:              # sources, dates, quotes
+        p = mcp_call("get_passage", "critic", item_id=l["source"])
+        if p is None or l["source"] not in evidence:
+            reasons.append(f"{l['source']}: cited source is not in the evidence or was published after the forecast date")
+        elif norm(l["quote"]) not in norm(p["text"]):
+            reasons.append(f"{l['source']}: the quote '{l['quote']}' does not appear in the passage")
+    fc, base = state.get("forecast") or {}, state.get("baseline") or {}
+    reasons += [f"forecast {p}" for p in problems_baseline(fc)] if fc else []
+    if fc and base and max(abs(fc[k] - base[k]) for k in OUTCOMES) > MAX_TOTAL_SHIFT + 0.05:
+        reasons.append("forecast moves more than the cap away from the baseline")
+
+    retries = state.get("retries", 0)
+    if OPTIONS["protocol"] == "one_way":             # no feedback loop: whatever arrives is published
+        v = {"ok": True, "route": "finalise", "reasons": [], "unchecked": reasons}
+        return {"verdict": handoff("verdict", v), "_note": "one-way: not checked" + (f" ({len(reasons)} problems)" if reasons else "")}
+    if not reasons:
+        return {"verdict": handoff("verdict", {"ok": True, "route": "finalise", "reasons": []}), "_note": "accepted"}
+    if retries >= MAX_RETRIES:
+        v = {"ok": False, "route": "fallback", "reasons": reasons + [f"still failing after {retries} retries"]}
+        return {"verdict": handoff("verdict", v), "_note": "retries used up"}
+    route = "research" if to_research else "synthesis"
+    if OPTIONS["protocol"] == "two_way_no_reason":   # rejection without saying why
+        feedback, hints = ["The critic rejected the forecast."], []
+    else:
+        feedback = reasons
+    v = {"ok": False, "route": route, "reasons": reasons}
+    return {"verdict": handoff("verdict", v), "retries": retries + 1, "feedback": feedback, "hints": hints,
+            "_note": f"rejected -> {route}: " + " | ".join(reasons)}
+
+def route_after_critic(state):
+    return state["verdict"]["route"]
+
+def finalise(state):
+    return {"final": {"status": "accepted", "probabilities": state["forecast"], "ledger": state["ledger"],
+                      "baseline": state["baseline"]}, "_note": "forecast published"}
+
+def fallback(state):
+    base = state.get("baseline") or floor_and_normalise({"fall": 30.85, "flat": 38.3, "gain": 30.85})
+    why = (state.get("verdict") or {}).get("reasons") or state.get("error") or []
+    return {"final": {"status": "baseline", "probabilities": base, "ledger": [], "baseline": base, "why": why},
+            "_note": "baseline reported: " + "; ".join(why)[:200]}
+
+NODES = {"coordinator": coordinator, "quant": quant, "research": research, "synthesis": synthesis,
+         "critic": critic, "research_more": research, "finalise": finalise, "fallback": fallback}
