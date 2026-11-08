@@ -13,6 +13,7 @@ from build import parse_cells  # noqa: E402
 
 SRC = ROOT / "notebooks" / "tot_validation" / "notebook.src"
 BASELINE_SRC = ROOT / "notebooks" / "baseline_comparison" / "notebook.src"
+MULTI_AGENT_SRC = ROOT / "notebooks" / "multi_agent" / "notebook.src"
 
 
 def load_core(src: Path = SRC, module_name: str = "tot_core", **overrides) -> dict:
@@ -36,3 +37,7 @@ def load_core(src: Path = SRC, module_name: str = "tot_core", **overrides) -> di
 
 def load_baseline_core(**overrides) -> dict:
     return load_core(BASELINE_SRC, "baseline_core", **overrides)
+
+
+def load_multi_agent_core(**overrides) -> dict:
+    return load_core(MULTI_AGENT_SRC, "multi_agent_core", **overrides)
