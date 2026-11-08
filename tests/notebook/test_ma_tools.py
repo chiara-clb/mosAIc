@@ -79,3 +79,9 @@ def test_branch_log_and_tool_log_record_calls():
 def test_clean_extract_keeps_ordinary_text():
     text = "Revenue rose 10%. Margins were stable."
     assert NS["clean_extract"](text) == (text, False)
+
+
+def test_list_all_returns_every_filing_in_the_window_only():
+    hits = call("search_documents", "research", query="", list_all=True)
+    assert {h["id"] for h in hits} == {"F1", "F2", "F3"}
+    assert all(h["score"] == NS["MIN_SCORE"] for h in hits)

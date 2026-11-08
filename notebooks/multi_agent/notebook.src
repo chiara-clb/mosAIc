@@ -314,14 +314,15 @@ def tool_market_data(kind):
         return {"last_results": last, "next_estimate": last + timedelta(days=91) if last else None}
     raise ValueError(f"unknown market data {kind!r}")
 
-def tool_search_documents(query, k=K_FINAL):
+def tool_search_documents(query, k=K_FINAL, list_all=False):
+    """Filings from the last 30 days that match the query. list_all=True returns every one (score MIN_SCORE)."""
     w = CTX["world"]
     since = w["as_of"] - timedelta(days=FRESH_DAYS)
     hits = []
     for f in w["filings"]:
         if not _visible(f, since):
             continue
-        score = similarity(query, f["section"] + " " + f["text"])
+        score = MIN_SCORE if list_all else similarity(query, f["section"] + " " + f["text"])
         if score >= MIN_SCORE:
             extract, removed = clean_extract(f["text"])
             header = f"{f['form']} | {f['section']} | filed {f['filed']:%Y-%m-%d}"
@@ -572,7 +573,7 @@ Each agent is one function that LangGraph will run as a node. It reads what it n
 
 - **Coordinator** (code): checks the earnings calendar (only the last results date and an estimate of the next one, never the real future date) and resets the retry counter.
 - **Quant** (code): baseline version C from the design: the volatility of recent moves blended half and half with the past year, the thresholds at ±0.5σ of the past year, and wider tails when results fall in the month.
-- **Research** (model + tools): a ReAct loop of up to 4 steps. The model picks the next search from what it has seen so far; an empty search is rephrased. If the critic sent it back, the critic's hint becomes the next search. Code then builds the handoff: it attaches the full passage (which the research model never saw), applies the same-story rule (a news story within 3 days of a filing it reports on becomes coverage of that filing) and keeps at most 5 items.
+- **Research** (model + tools): a ReAct loop of up to 4 steps. The model picks the next search from what it has seen so far; an empty search is rephrased. If the critic sent it back, the critic's hint becomes the next search. Two guards, added after a run with Qwen 3B: an empty or repeated query is not run (the model is told to use different words), and if the model never searches the filings on the first pass, code lists every filing from the last 30 days. Code then builds the handoff: it attaches the full passage (which the research model never saw), applies the same-story rule (a news story within 3 days of a filing it reports on becomes coverage of that filing) and keeps at most 5 items.
 - **Synthesis** (model, no search): Tree of Thought from Checkpoint 4. Two readings per item from the model plus "no effect" from code; each reading's quote is checked by the critic's model; base rates from case memory, including a measured rate for "no effect"; novelty; beam search with breadth 3. If the model asks for a tool while reading a passage, the request goes through `mcp_call` and is refused, because synthesis has no search tools.
 - **Critic** (code checks): every cited source exists, was published before the forecast date and contains the quoted words; news about a company event has its filing in the evidence; the probabilities add up and stay within the cap. A rejection carries the reasons and, for missing evidence, a hint for the next search.
 - **Finalise / fallback**: the accepted forecast, or the baseline with the reason it was used.
@@ -692,8 +693,15 @@ def research(state, agent="research", full_text=False):
         a = ask(agent, RESEARCH_TASK, payload, 150) or {"action": "finish"}
         if a.get("action") not in ("search_documents", "search_news"):
             break
+        query = str(a.get("query") or "").strip()
+        if not query or (a["action"], query.lower()) in {(o["tool"], o["query"].lower()) for o in observations}:
+            observations.append({"tool": a["action"], "query": query, "results": [],
+                                 "note": "Empty or repeated query, not run. Use different words or another tool."})
+            notes.append(f"{a['action']}('{query}') -> refused: {'empty' if not query else 'repeated'}")
+            continue
+        a["query"] = query
         try:
-            hits = mcp_call(a["action"], agent, query=a.get("query", ""))
+            hits = mcp_call(a["action"], agent, query=query)
         except ToolError as exc:
             return {"error": [f"research: {exc}"], "_note": f"{a['action']} unavailable"}
         shown = [{k: h[k] for k in ("id", "header", "score", "extract")} for h in hits]
@@ -706,6 +714,19 @@ def research(state, agent="research", full_text=False):
                 full = _passage(h["id"])                       # code adds the full passage; the model never saw it
                 pool[h["id"]] = {**h, "published": published(full), "coverage": [],
                                  "full_text": full.get("text") or " | ".join(full["headlines"]),
+                                 "event": full["event"], "reaction": full["reaction"], "novelty": full["novelty"]}
+    searched_filings = any(o["tool"] == "search_documents" and "note" not in o for o in observations)
+    if not searched_filings and not state.get("evidence"):
+        # Safety net: the model never searched the filings, so code lists every filing from the last 30 days
+        try:
+            hits = mcp_call("search_documents", agent, query="", list_all=True)
+        except ToolError as exc:
+            return {"error": [f"research: {exc}"], "_note": "search_documents unavailable"}
+        notes.append(f"no filing search by the model; code listed {len(hits)} recent filings")
+        for h in hits:
+            if h["id"] not in pool:
+                full = _passage(h["id"])
+                pool[h["id"]] = {**h, "published": published(full), "coverage": [], "full_text": full["text"],
                                  "event": full["event"], "reaction": full["reaction"], "novelty": full["novelty"]}
     items = same_story(sorted(pool.values(), key=lambda e: -e["score"]))[:K_FINAL]
     items = [handoff("evidence", e) for e in sorted(items, key=lambda e: e["published"], reverse=True)]
@@ -994,7 +1015,7 @@ Each scenario changes the script or switches a tool off, and states the path the
 | 1 | Normal | nothing | accepted on the first pass |
 | 2 | Empty search | the first query finds nothing | research rephrases; accepted |
 | 3 | Wrong reading | synthesis cites words that are not in the CFO filing, and the grounding judge misses it | critic → synthesis with the reason; fixed; accepted |
-| 4 | Missing filing | research only reads the news, so the CFO story has no filing behind it | critic → research with a hint; the filing is found; accepted |
+| 4 | Missing filing | research searches the legal section and the news, so the CFO story has no filing behind it | critic → research with a hint; the filing is found; accepted |
 | 5 | Retries used up | synthesis keeps citing words that are not there | two retries, then the baseline |
 | 6 | Tool down | the document index is unavailable | the baseline, with the reason |
 | 7 | Hidden instructions | the model obeys instructions it reads in a filing | the tool request is refused; no injected call; accepted |
@@ -1018,7 +1039,8 @@ SCENARIOS = {
     "3 wrong reading": {"script": {"readings": _readings(F1=FABRICATED_F1), "lenient_judge": True,
                                    "readings_after_feedback": {"F1": DEFAULT_SCRIPT["readings"]["F1"]}},
                         "failures": (), "expect": {"status": "accepted", "retries": 1, "via": "critic → synthesis"}},
-    "4 missing filing": {"script": {"queries": [], "news_query": "Acme Robotics CFO finance chief contract"},
+    "4 missing filing": {"script": {"queries": ["legal proceedings lawsuits"],
+                                    "news_query": "Acme Robotics CFO finance chief contract"},
                          "failures": (), "expect": {"status": "accepted", "retries": 1, "via": "critic → research_more"}},
     "5 retries used up": {"script": {"readings": _readings(F1=FABRICATED_F1), "lenient_judge": True},
                           "failures": (), "expect": {"status": "baseline", "retries": MAX_RETRIES}},

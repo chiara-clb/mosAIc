@@ -127,7 +127,7 @@ def test_critic_sends_a_made_up_quote_back_to_synthesis_with_the_reason():
 
 
 def test_critic_sends_missing_filings_back_to_research_with_a_hint():
-    s, _ = start(script={"queries": [], "news_query": "Acme Robotics CFO finance chief contract"})
+    s, _ = start(script={"queries": ["legal proceedings lawsuits"], "news_query": "Acme Robotics CFO finance chief contract"})
     through(s, "coordinator", "quant", "research", "synthesis", "critic")
     assert s["verdict"]["route"] == "research" and s["hints"]
     step(s, "research_more")
@@ -153,3 +153,38 @@ def test_one_way_publishes_without_checking_and_no_reason_hides_the_problem():
 def test_critic_routes_tool_failures_to_the_fallback():
     s = through(start(failures={"search_documents"})[0], "coordinator", "quant", "research", "synthesis", "critic")
     assert s["verdict"]["route"] == "fallback" and "skipped" in s["trace"][-2]["note"]
+
+
+def lazy_chat(replies):
+    """A stand-in for a weak model: returns the given research replies in order, then finishes."""
+    it = iter(replies)
+
+    def chat(messages, max_tokens):
+        if "Agent: research" in messages[0]["content"]:
+            return __import__("json").dumps(next(it, {"action": "finish"}))
+        return NS["scripted_chat"](messages, max_tokens)
+    return chat
+
+
+def test_empty_and_repeated_queries_are_not_run():
+    s, _ = start()
+    NS["CTX"]["model"] = NS["Model"](lazy_chat([
+        {"action": "search_documents", "query": ""},
+        {"action": "search_news", "query": "Acme Robotics contract deal"},
+        {"action": "search_news", "query": "acme robotics contract deal "},
+        {"action": "search_documents", "query": "chief financial officer resignation"}]))
+    through(s, "coordinator", "research")
+    note = s["trace"][-1]["note"]
+    assert "refused: empty" in note and "refused: repeated" in note
+    runs = [e for e in NS["CTX"]["tool_log"] if e["tool"].startswith("search")]
+    assert len(runs) == 2                                    # only the two real queries reached a tool
+    assert "no filing search" not in note
+
+
+def test_code_lists_recent_filings_when_the_model_never_searches_them():
+    s, _ = start()
+    NS["CTX"]["model"] = NS["Model"](lazy_chat([{"action": "search_news", "query": "Acme Robotics contract deal"}]))
+    through(s, "coordinator", "research")
+    ids = {e["id"] for e in s["evidence"]}
+    assert {"F1", "F2", "F3"} <= ids and not {"F4", "F5"} & ids   # the window and the date rule still apply
+    assert "code listed 3 recent filings" in s["trace"][-1]["note"]
