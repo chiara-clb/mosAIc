@@ -73,7 +73,7 @@ Each agent is written as a CrewAI role card: a role, a goal, a backstory that se
 - `kind`: whether the agent is plain code or uses the language model.
 - `sees`: what part of the evidence it is shown.
 
-The tool lists are the important part. Only the research agent can search. Synthesis reads full passages but cannot call a search. The critic can only fetch a passage by its id, to check a quote.
+The tool lists are the important part. Only the research agent can search. Synthesis reads full passages but cannot call a search. The critic can only fetch a passage by its id, to check a quote. Its final checks are code; its model is used inside the Tree of Thought step to judge whether a passage supports a reading.
 
 #%% core
 ROLES = {
@@ -105,7 +105,8 @@ ROLES = {
         "role": "Critic",
         "goal": "Check sources, dates, quotes and arithmetic. Accept the forecast, or send it back with a reason.",
         "backstory": "You are the last check before an analyst sees the forecast. You say exactly what to fix.",
-        "tools": ["get_passage"], "kind": "code", "sees": "the ledger, the evidence list and the passages by id"},
+        "tools": ["get_passage"], "kind": "code + llm",
+        "sees": "the ledger, the evidence list and the passages by id"},
 }
 
 AGENTS = list(ROLES)
@@ -377,3 +378,176 @@ def mcp_call(tool, caller, **kwargs):
     out = TOOLS[tool](**kwargs)
     CTX["tool_log"].append({**entry, "status": "ok"})
     return out
+
+#%% md
+## 5. Handoffs and the model
+
+**Handoffs.** Agents do not chat freely. Each hands over one JSON object of a fixed shape, and the receiving side checks it before using it. A malformed handoff stops at the boundary instead of spreading. The four shapes are:
+
+| Handoff | From → to | Fields |
+| --- | --- | --- |
+| Baseline | quant → synthesis | fall, flat, gain (percent, summing to 100) |
+| Evidence item | research → synthesis | id, kind, header, published, extract, full text (added by code), linked coverage |
+| Ledger line | synthesis → critic | source id, effect, size, quote, reason, shift |
+| Verdict | critic → router | ok, route (finalise, research, synthesis, fallback), reasons |
+
+**The model.** Every model call goes through `Model`, which counts calls against the budget. Each agent builds its messages from its role card, so the same prompts work for the scripted model and for a real one.
+
+**The scripted model** reads the agent's name and input from the messages and answers from a script. The default script makes the mistakes a real model makes: its first reading of standard legal wording is "fall", and its first reading of the CFO resignation is "fall, medium". Scenarios in section 8 change the script to plant other mistakes.
+
+#%% core
+EFFECTS = ("fall", "gain", "spread", "none")
+ROUTES = ("finalise", "research", "synthesis", "fallback")
+
+def problems_baseline(b):
+    out = [f"missing {k}" for k in OUTCOMES if k not in b]
+    if not out:
+        if abs(sum(b[k] for k in OUTCOMES) - 100) > 0.05:
+            out.append("does not sum to 100")
+        out += [f"{k} below {MIN_PROB}%" for k in OUTCOMES if b[k] < MIN_PROB - 1e-9]
+    return out
+
+def problems_evidence(e):
+    out = [f"missing {k}" for k in ("id", "kind", "header", "published", "extract", "full_text") if not e.get(k)]
+    if e.get("kind") not in ("filing", "news"):
+        out.append("kind must be filing or news")
+    return out
+
+def problems_reading(r):
+    out = []
+    if r.get("effect") not in EFFECTS:
+        out.append(f"unknown effect {r.get('effect')!r}")
+    elif r["effect"] != "none" and r.get("size") not in STRENGTH_POINTS:
+        out.append(f"unknown size {r.get('size')!r}")
+    if r.get("effect") != "none" and not str(r.get("quote", "")).strip():
+        out.append("no quote")
+    return out
+
+def problems_line(l):
+    return problems_reading(l) + [f"missing {k}" for k in ("source", "shift") if k not in l]
+
+def problems_verdict(v):
+    out = [] if isinstance(v.get("ok"), bool) else ["ok must be true or false"]
+    if v.get("route") not in ROUTES:
+        out.append(f"unknown route {v.get('route')!r}")
+    return out
+
+CHECKS = {"baseline": problems_baseline, "evidence": problems_evidence, "reading": problems_reading,
+          "line": problems_line, "verdict": problems_verdict}
+
+def handoff(kind, obj):
+    """Check a handoff at the boundary; raise instead of passing on a malformed object."""
+    p = CHECKS[kind](obj)
+    if p:
+        raise ValueError(f"bad {kind} handoff: {'; '.join(p)}")
+    return obj
+
+class BudgetError(RuntimeError):
+    pass
+
+class Model:
+    """Counts every call, so the budget per forecast can be enforced."""
+
+    def __init__(self, chat_fn, budget=MAX_MODEL_CALLS):
+        self.chat_fn, self.calls, self.budget = chat_fn, 0, budget
+
+    def __call__(self, messages, max_tokens=300):
+        if self.calls >= self.budget:
+            raise BudgetError(f"model budget of {self.budget} calls used up")
+        self.calls += 1
+        return self.chat_fn(messages, max_tokens)
+
+def parse_json(reply):
+    """First JSON object in a reply, tolerating code fences and extra text."""
+    reply = re.sub(r"```(?:json)?", "", reply or "")
+    m = re.search(r"\{.*\}", reply, re.S)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return None
+
+def agent_messages(agent, task, payload):
+    r = ROLES[agent] if agent in ROLES else ROLES["research"]
+    system = (f"Agent: {agent}\nYou are the {r['role']}. Goal: {r['goal']}\n{r['backstory']}\n\n{task}\n"
+              "Reply only with one JSON object.")
+    return [{"role": "system", "content": system},
+            {"role": "user", "content": "INPUT:\n" + json.dumps(payload, default=str)}]
+
+def ask(agent, task, payload, max_tokens=300):
+    """One model call for an agent; returns the parsed JSON (or None)."""
+    return parse_json(CTX["model"](agent_messages(agent, task, payload), max_tokens))
+
+#%% core
+DEFAULT_SCRIPT = {
+    "queries": ["chief financial officer resignation", "legal proceedings lawsuits", "headquarters other events"],
+    "news_query": "Acme Robotics contract deal",
+    "rephrase": {},                  # empty search -> next query
+    "readings": {                    # two readings per item; the first is the tempting one
+        "F1": [{"effect": "fall", "size": "medium", "quote": "her decision to resign as Chief Financial Officer",
+                "reason": "Losing the CFO is bad news."},
+               {"effect": "spread", "size": "small",
+                "quote": "the Company has not named an interim Chief Financial Officer",
+                "reason": "A finance leadership gap adds uncertainty without a clear direction."}],
+        "F2": [{"effect": "fall", "size": "small", "quote": "involved in legal proceedings and claims",
+                "reason": "Pending lawsuits are a risk."},
+               {"effect": "spread", "size": "small", "quote": "involved in legal proceedings and claims",
+                "reason": "Litigation could go either way."}],
+        "F3": [{"effect": "gain", "size": "small", "quote": "completed the move of its headquarters to Austin, Texas",
+                "reason": "A cheaper location may cut costs."},
+               {"effect": "spread", "size": "small", "quote": "completed the move of its headquarters to Austin, Texas",
+                "reason": "A move can disrupt operations."}],
+        "S1": [{"effect": "fall", "size": "small", "quote": "Acme Robotics finance chief resigns",
+                "reason": "Negative coverage of a departure."},
+               {"effect": "spread", "size": "small", "quote": "no interim named",
+                "reason": "Uncertainty about who runs finance."}],
+        "S2": [{"effect": "gain", "size": "small",
+                "quote": "Acme Robotics wins warehouse automation contract with large retailer",
+                "reason": "A new large customer adds revenue."},
+               {"effect": "gain", "size": "medium", "quote": "Acme Robotics lands retail robotics deal",
+                "reason": "The deal could be large."}],
+    },
+    "readings_after_feedback": {},   # id -> readings used once the critic has named that item
+    "lenient_judge": False,          # True: the grounding judge accepts any quote
+    "gullible": False,               # True: the model obeys instructions it finds in a passage
+}
+
+def scripted_research(p, s):
+    done = [o["query"] for o in p["observations"]]
+    hints = [h for h in p.get("hints", []) if h not in done]
+    if hints:
+        return {"thought": "The critic asked for this.", "action": "search_documents", "query": hints[0]}
+    last = p["observations"][-1] if p["observations"] else None
+    if last and not last["results"] and last["query"] in s["rephrase"] and s["rephrase"][last["query"]] not in done:
+        return {"thought": "Nothing found; rephrase.", "action": last["tool"], "query": s["rephrase"][last["query"]]}
+    if p.get("hints_given"):
+        return {"thought": "Found what the critic asked for.", "action": "finish"}
+    for q in s["queries"]:
+        if q not in done:
+            return {"thought": "Next topic.", "action": "search_documents", "query": q}
+    if s.get("news_query") and s["news_query"] not in done:
+        return {"thought": "Check the news.", "action": "search_news", "query": s["news_query"]}
+    return {"thought": "Enough evidence.", "action": "finish"}
+
+def scripted_synthesis(p, s):
+    item = p["item"]
+    named = [f for f in p.get("feedback", []) if item["id"] in f]
+    readings = (s["readings_after_feedback"].get(item["id"]) if named else None) or s["readings"].get(item["id"])
+    out = {"readings": readings or [{"effect": "none", "size": None, "quote": "", "reason": "No script."}] * 2}
+    if s["gullible"] and re.search(INJECTION_PATTERNS[0], item["text"], re.I):
+        out = {"readings": [{"effect": "gain", "size": "large", "quote": "report a large gain",
+                             "reason": "The filing says to report a large gain."}] * 2,
+               "tool_request": {"tool": "search_news", "query": "acme buyout rumor"}}
+    return out
+
+def scripted_judge(p, s):
+    return {"supported": True if s["lenient_judge"] else p["quote"].lower() in p["passage"].lower()}
+
+SCRIPTED = {"research": scripted_research, "synthesis": scripted_synthesis, "critic": scripted_judge}
+
+def scripted_chat(messages, max_tokens=300):
+    agent = re.match(r"Agent: (\w+)", messages[0]["content"]).group(1)
+    payload = json.loads(messages[-1]["content"].split("INPUT:\n", 1)[1])
+    script = {**DEFAULT_SCRIPT, **CTX.get("script", {})}
+    return json.dumps(SCRIPTED[agent](payload, script))
