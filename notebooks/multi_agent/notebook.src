@@ -449,8 +449,8 @@ class BudgetError(RuntimeError):
 class Model:
     """Counts every call, so the budget per forecast can be enforced."""
 
-    def __init__(self, chat_fn, budget=MAX_MODEL_CALLS):
-        self.chat_fn, self.calls, self.budget = chat_fn, 0, budget
+    def __init__(self, chat_fn, budget=None):
+        self.chat_fn, self.calls, self.budget = chat_fn, 0, budget or MAX_MODEL_CALLS
 
     def __call__(self, messages, max_tokens=300):
         if self.calls >= self.budget:
@@ -568,7 +568,7 @@ def scripted_chat(messages, max_tokens=300):
 #%% md
 ## 6. The agents
 
-Each agent is one function that LangGraph will run as a node. It reads what it needs from the shared state and returns only the fields it changes. `as_node` wraps every agent so the run's trace records which node ran, how many model and tool calls it made, and a short note.
+Each agent is one function that LangGraph will run as a node. It reads what it needs from the shared state and returns only the fields it changes. `as_node` wraps every agent so the run's trace records which node ran, how many model and tool calls it made, and a short note. If the model budget runs out inside an agent, the wrapper turns that into an error, and the critic routes it to the fallback.
 
 - **Coordinator** (code): checks the earnings calendar (only the last results date and an estimate of the next one, never the real future date) and resets the retry counter.
 - **Quant** (code): baseline version C from the design: the volatility of recent moves blended half and half with the past year, the thresholds at ±0.5σ of the past year, and wider tails when results fall in the month.
@@ -601,7 +601,10 @@ def as_node(name, fn):
     def node(state):
         m0 = CTX["model"].calls if CTX.get("model") else 0
         t0 = len(CTX["tool_log"])
-        out = dict(fn(state) or {})
+        try:
+            out = dict(fn(state) or {})
+        except BudgetError as exc:                    # out of model calls: stop cleanly and report the baseline
+            out = {"error": [f"{name}: {exc}"], "_note": str(exc)}
         note = out.pop("_note", "")
         calls = (CTX["model"].calls if CTX.get("model") else 0) - m0
         out["trace"] = [{"node": name, "model_calls": calls, "tool_calls": len(CTX["tool_log"]) - t0, "note": note}]
@@ -1155,6 +1158,80 @@ display(detail.pivot(index="scenario", columns="configuration", values="status")
 
 - **One-way is cheapest but publishes mistakes.** Without the critic's loop, the made-up quote in scenarios 3 and 5 reaches the analyst, and the missing filing in scenario 4 is never fetched.
 - **Two-way without reasons costs the most for the least.** The critic catches the problem, but synthesis does not know what to fix, so it repeats the mistake until the retries run out and the baseline is reported. Reasons are what make the loop converge.
-- **Tree of Thought fixes first-reading errors.** The linear pipeline takes "fall" for standard legal wording and for the headquarters move; ToT compares readings against base rates and novelty and keeps "no effect".
+- **Tree of Thought fixes first-reading errors.** The linear pipeline takes "fall" for standard legal wording and "gain" for the headquarters move; ToT compares readings against base rates and novelty and keeps "no effect".
 - **One agent is simpler but unsafe here.** It needs no handoffs, but it reads the hidden instructions while holding the search tools and makes the injected call, and with nobody else checking its quotes, the made-up quote is published.
 - **The design pays for its reliability in calls.** The two-way design uses more model calls than one-way in the scenarios where it sends work back; the retry cap keeps that bounded.
+
+#%% md
+## 10. Optional: CrewAI agents and a real model
+
+**CrewAI.** The role cards in section 2 use CrewAI's fields, so they turn into CrewAI agents directly. In MosAIc, LangGraph decides the order and the routing, and each agent's tools are bound through `mcp_call`, which enforces the role check; CrewAI holds the role definitions. Set `USE_CREWAI = True` to build the agents (it needs `pip install crewai`; constructing the agents makes no model calls).
+
+#%% core
+USE_CREWAI = False
+
+def crewai_kwargs(name):
+    """Arguments for crewai.Agent from a role card."""
+    r = ROLES[name]
+    return {"role": r["role"], "goal": r["goal"], "backstory": r["backstory"], "allow_delegation": False,
+            "verbose": False}
+
+#%% code
+if USE_CREWAI:
+    !pip install -q crewai
+    from crewai import Agent
+    CREW = {}
+    for name in AGENTS:
+        try:
+            CREW[name] = Agent(**crewai_kwargs(name))
+        except Exception as exc:                      # some CrewAI versions need an llm= argument here
+            print(f"{name}: {exc}")
+    for name, agent in CREW.items():
+        print(f"{name:<12} {agent.role:<22} tools via mcp_call: {', '.join(ROLES[name]['tools'])}")
+
+#%% md
+**A real model.** Set `MODE = "real"` in section 1 and run the cells below on a GPU runtime. The agents, prompts, tools and graph stay the same; only the model behind `CHAT` changes. The planted mistakes in the scripts no longer apply, so the scenarios test what the real model does: scenario 6 (tool down) still ends in the baseline, while the others may take different paths. Expect a few minutes per forecast with Qwen 3B on a T4.
+
+#%% code
+def make_chat(backend, model_name):
+    if backend == "hf":
+        from transformers import AutoTokenizer, AutoModelForCausalLM
+        tok = AutoTokenizer.from_pretrained(model_name)
+        lm = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
+
+        def chat(messages, max_tokens):
+            prompt = tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = tok(prompt, return_tensors="pt").to(lm.device)
+            out = lm.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
+            return tok.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+        return chat
+    if backend == "anthropic":                        # needs ANTHROPIC_API_KEY
+        import anthropic
+        client = anthropic.Anthropic()
+
+        def chat(messages, max_tokens):
+            system = "\n".join(m["content"] for m in messages if m["role"] == "system")
+            rest = [m for m in messages if m["role"] != "system"]
+            r = client.messages.create(model=model_name, system=system, messages=rest, max_tokens=max_tokens, temperature=0)
+            return r.content[0].text.strip()
+        return chat
+    raise ValueError(f"unknown backend {backend!r}")
+
+if MODE == "real":
+    !pip install -q transformers accelerate
+    CHAT = make_chat(LLM_BACKEND, LLM_MODEL)
+    real_rows, REAL_STATES = run_scenarios(GRAPH, names=["1 normal", "6 tool down", "7 hidden instructions"])
+    display(pd.DataFrame(real_rows).set_index("scenario")[cols])
+
+#%% md
+## 11. What this shows for Checkpoint 5
+
+| Checkpoint 5 element | Shown by |
+| --- | --- |
+| **Problem and why several agents** | The single agent made the injected tool call and published a made-up quote; the five-agent design did neither (section 9) |
+| **Number of agents and roles** | Five role cards with separate tools; tools refuse any agent without the role (sections 2 and 4) |
+| **Coordination strategy** | Quant and research run in the same step; synthesis waits for both; the critic's conditional edge routes to finalise, research, synthesis or the fallback, at most twice (sections 7 and 8) |
+| **Communication** | Checked JSON handoffs; the research agent sees cleaned extracts only; rejections carry reasons and hints, and without them the loop does not converge (sections 5, 8 and 9) |
+| **Trade-offs** | One-way is cheaper but publishes mistakes; the design uses more calls only when it sends work back, bounded by the retry cap; ToT fixes first-reading errors (section 9) |
+
+**Limits.** In scripted mode the mistakes are planted, so the comparison shows which failures each design lets through, not how often a real model makes them. The latency column is an estimate from call counts. The company and its filings are synthetic.

@@ -75,3 +75,22 @@ class Compiled:
                             seen[j] = set()
             active = [d for d in dict.fromkeys(nxt) if d != END]
         return state
+
+    def get_graph(self):
+        return _Drawing(self.g)
+
+
+class _Drawing:
+    """Text drawing only; the real LangGraph also renders a PNG."""
+
+    def __init__(self, g):
+        self.g = g
+
+    def draw_mermaid(self):
+        lines = ["graph TD"] + [f"  {s} --> {d}" for s, d in self.g.edges]
+        lines += [f"  {s} --> {d}" for srcs, d in self.g.joins for s in srcs]
+        lines += [f"  {s} -.->|{k}| {d}" for s, (_, m) in self.g.cond.items() for k, d in m.items()]
+        return "\n".join(lines)
+
+    def draw_mermaid_png(self):
+        raise RuntimeError("no renderer offline")

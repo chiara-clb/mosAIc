@@ -66,3 +66,14 @@ def test_latency_counts_the_parallel_branch_once():
     _, s = NS["run_forecast"](graph())
     serial = s["model calls"] * NS["SECONDS_PER_MODEL_CALL"] + s["tool calls"] * NS["SECONDS_PER_TOOL_CALL"]
     assert s["est. seconds"] < serial
+
+
+def test_running_out_of_model_calls_ends_in_the_baseline():
+    budget = NS["MAX_MODEL_CALLS"]
+    NS["MAX_MODEL_CALLS"] = 6
+    try:
+        state, summary = NS["run_forecast"](graph(), chat=NS["scripted_chat"])
+    finally:
+        NS["MAX_MODEL_CALLS"] = budget
+    assert summary["status"] == "baseline" and summary["model calls"] <= 6
+    assert any("budget" in w for w in state["final"]["why"])
