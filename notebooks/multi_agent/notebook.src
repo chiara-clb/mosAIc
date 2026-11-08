@@ -16,7 +16,7 @@ Checkpoint 5 describes MosAIc as five agents. This notebook builds that design a
 
 **How the pieces map to the lessons.** LangGraph runs the flow: every agent is a node, every handoff an edge, and the critic's decision is a conditional edge, as in this week's lab. The roles (role, goal, backstory, tools) are written in CrewAI's format, and an optional cell turns them into CrewAI agents. The tools sit behind one `mcp_call` interface, standing in for MCP servers.
 
-**What this notebook does not test.** By default the model is *scripted*: its answers are written in advance for each scenario, including deliberate mistakes. That makes every scenario repeatable and lets the notebook run in seconds without a GPU, but it means the notebook tests coordination (who sees what, who talks to whom, what happens when something fails), not forecasting skill. The company, filings and news are synthetic. Set `MODE = "real"` in section 1 to run the same agents with Qwen on a Colab GPU; the scenarios may then take different paths.
+**What this notebook does not test.** By default the model is *scripted*: its answers are written in advance for each scenario, including deliberate mistakes. That makes every scenario repeatable and lets the notebook run in seconds without a GPU, but it means the notebook tests coordination (who sees what, who talks to whom, what happens when something fails), not forecasting skill. The company, filings and news are synthetic. Sections 7 to 9 always use the scripted model, because their scenarios depend on planted mistakes. To see what a real model does, set `MODE = "real"` in section 1 and run section 10, which runs three scenarios with Qwen on a Colab GPU.
 
 #%% code
 !pip install -q langgraph
@@ -1217,11 +1217,22 @@ def make_chat(backend, model_name):
         return chat
     raise ValueError(f"unknown backend {backend!r}")
 
-if MODE == "real":
+if MODE != "real":
+    print("MODE is 'scripted': set MODE = 'real' in section 1, run it again, then run this cell.")
+else:
+    print(f"Running with {LLM_BACKEND} / {LLM_MODEL} (sections 7 to 9 above always use the scripted model)")
     !pip install -q transformers accelerate
-    CHAT = make_chat(LLM_BACKEND, LLM_MODEL)
-    real_rows, REAL_STATES = run_scenarios(GRAPH, names=["1 normal", "6 tool down", "7 hidden instructions"])
-    display(pd.DataFrame(real_rows).set_index("scenario")[cols])
+    if "REAL_CHAT" not in globals():
+        REAL_CHAT = make_chat(LLM_BACKEND, LLM_MODEL)       # loaded once; the scripted CHAT is left untouched
+    real_rows, REAL_STATES = run_scenarios(GRAPH, names=["1 normal", "6 tool down", "7 hidden instructions"],
+                                           chat=REAL_CHAT)
+    real = pd.DataFrame(real_rows).set_index("scenario")
+    real.insert(0, "model", LLM_MODEL)
+    display(real[["model"] + cols])
+    for name, st in REAL_STATES.items():
+        print(f"\n=== {name} ({LLM_MODEL}) ===")
+        for t in st["trace"]:
+            print(f"  {t['node']:<14} model {t['model_calls']:>2}  tools {t['tool_calls']:>2}  {t['note'][:150]}")
 
 #%% md
 ## 11. What this shows for Checkpoint 5
