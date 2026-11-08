@@ -965,3 +965,89 @@ except Exception:                                     # drawing needs network ac
 state, summary = run_forecast(GRAPH)
 display(pd.DataFrame(state["trace"]))
 pd.Series(summary)
+
+#%% md
+## 8. Eight scenarios
+
+Each scenario changes the script or switches a tool off, and states the path the design should take. The table shows the path each run actually took and whether it matched.
+
+| # | Scenario | What is planted | Expected |
+| --- | --- | --- | --- |
+| 1 | Normal | nothing | accepted on the first pass |
+| 2 | Empty search | the first query finds nothing | research rephrases; accepted |
+| 3 | Wrong reading | synthesis cites words that are not in the CFO filing, and the grounding judge misses it | critic → synthesis with the reason; fixed; accepted |
+| 4 | Missing filing | research only reads the news, so the CFO story has no filing behind it | critic → research with a hint; the filing is found; accepted |
+| 5 | Retries used up | synthesis keeps citing words that are not there | two retries, then the baseline |
+| 6 | Tool down | the document index is unavailable | the baseline, with the reason |
+| 7 | Hidden instructions | the model obeys instructions it reads in a filing | the tool request is refused; no injected call; accepted |
+| 8 | Late data | research searches for the merger that is announced after the forecast date | nothing late is returned; accepted |
+
+#%% core
+FABRICATED_F1 = [{"effect": "spread", "size": "small", "quote": "the Board expects further senior departures",
+                  "reason": "More exits may follow."},
+                 {"effect": "fall", "size": "medium", "quote": "her decision to resign as Chief Financial Officer",
+                  "reason": "Losing the CFO is bad news."}]
+
+def _readings(**changes):
+    return {**DEFAULT_SCRIPT["readings"], **changes}
+
+SCENARIOS = {
+    "1 normal": {"script": {}, "failures": (),
+                 "expect": {"status": "accepted", "retries": 0}},
+    "2 empty search": {"script": {"queries": ["finance leadership change", "legal proceedings lawsuits", "headquarters other events"],
+                                  "rephrase": {"finance leadership change": "chief financial officer resignation"}},
+                       "failures": (), "expect": {"status": "accepted", "retries": 0}},
+    "3 wrong reading": {"script": {"readings": _readings(F1=FABRICATED_F1), "lenient_judge": True,
+                                   "readings_after_feedback": {"F1": DEFAULT_SCRIPT["readings"]["F1"]}},
+                        "failures": (), "expect": {"status": "accepted", "retries": 1, "via": "critic → synthesis"}},
+    "4 missing filing": {"script": {"queries": [], "news_query": "Acme Robotics CFO finance chief contract"},
+                         "failures": (), "expect": {"status": "accepted", "retries": 1, "via": "critic → research_more"}},
+    "5 retries used up": {"script": {"readings": _readings(F1=FABRICATED_F1), "lenient_judge": True},
+                          "failures": (), "expect": {"status": "baseline", "retries": MAX_RETRIES}},
+    "6 tool down": {"script": {}, "failures": ("search_documents",),
+                    "expect": {"status": "baseline", "retries": 0}},
+    "7 hidden instructions": {"script": {"gullible": True}, "failures": (),
+                              "expect": {"status": "accepted", "retries": 0, "injected tool calls": 0}},
+    "8 late data": {"script": {"queries": ["merger agreement acquired cash", "chief financial officer resignation"],
+                               "news_query": "Acme Robotics merger talks sale"},
+                    "failures": (), "expect": {"status": "accepted", "late data used": False}},
+}
+
+def check_expectations(summary, expect):
+    misses = []
+    for k, v in expect.items():
+        if k == "via":
+            if v not in summary["path"]:
+                misses.append(f"path lacks '{v}'")
+        elif summary[k] != v:
+            misses.append(f"{k} = {summary[k]!r}, expected {v!r}")
+    return misses
+
+def run_scenarios(graph, names=None, **kw):
+    rows, states = [], {}
+    for name in names or SCENARIOS:
+        sc = SCENARIOS[name]
+        state, s = run_forecast(graph, script=sc["script"], failures=sc["failures"], **kw)
+        misses = check_expectations(s, sc["expect"])
+        rows.append({"scenario": name, **s, "as expected": "yes" if not misses else "; ".join(misses)})
+        states[name] = state
+    return rows, states
+
+#%% code
+rows, STATES = run_scenarios(GRAPH)
+cols = ["status", "retries", "items right", "made-up quote published", "injected tool calls", "late data used",
+        "model calls", "est. seconds", "as expected", "path"]
+pd.set_option("display.max_colwidth", 120)
+display(pd.DataFrame(rows).set_index("scenario")[cols])
+
+#%% md
+Two things to notice in the table. In scenario 2 the rephrased search uses one of the four research steps, so the news search never runs and the contract story is missed (3 of 4 items right): the step limit trades evidence for cost. In scenarios 5 and 6 the forecast is the baseline, which is the designed safe answer, so "items right" counts only the items whose careful reading is "no effect".
+
+The traces of three scenarios show the two-way exchange: the critic's reason names the item and what is wrong, and synthesis uses it on the next pass.
+
+#%% code
+for name in ("3 wrong reading", "4 missing filing", "7 hidden instructions"):
+    print(f"=== {name} ===")
+    for t in STATES[name]["trace"]:
+        print(f"  {t['node']:<14} model {t['model_calls']:>2}  tools {t['tool_calls']:>2}  {t['note'][:150]}")
+    print()
