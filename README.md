@@ -42,7 +42,7 @@ Results so far are in [docs/results.md](docs/results.md).
 | `docs/results.md` | What the notebooks showed |
 | `docs/figures/` | Architecture diagrams |
 
-The full system runs from the package on the demo company. Live SEC, news and price data are being moved into the package from the notebooks.
+The notebooks are where each part was first tested. The package holds the final version of the same code.
 
 ## Running it
 
@@ -55,7 +55,18 @@ python -m mosaic.cli --demo --scenario all          # the nine guardrail scenari
 python -m mosaic.cli --demo --backend anthropic     # the demo company with Claude (needs ANTHROPIC_API_KEY)
 ```
 
-Each forecast writes `report.md` (probabilities, ledger, review decision), `state.json` and `trace.jsonl` (every step and tool call, with the leakage audit) under `runs/`. Live data for real stocks is being added.
+Each forecast writes `report.md` (probabilities, ledger, review decision), `state.json` and `trace.jsonl` (every step and tool call, with the leakage audit) under `runs/`.
+
+**A real stock** needs internet access, a few extra packages and a contact for the SEC (its rule for automated access):
+
+```bash
+pip install -e ".[retrieval,prices,llm]"
+export MOSAIC_SEC_USER_AGENT="Your Name your.email@example.com"
+export ANTHROPIC_API_KEY=...                       # for --backend anthropic
+python -m mosaic.cli AAPL --as-of 2026-07-15 --backend anthropic --model claude-haiku-5-5
+```
+
+Filings, prices and news are cached under `data/`, so a second run on the same stock is fast.
 
 **In a notebook, no setup needed:** open `notebooks/multi_agent/checkpoint5_multi_agent.ipynb` in Google Colab and choose Run all. It runs in seconds on a small synthetic company and shows nine scenarios, including the guardrails at work. To use a real model, set `MODE = "real"` in section 1 (needs a GPU runtime for Qwen, or an Anthropic API key).
 
