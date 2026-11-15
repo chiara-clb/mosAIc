@@ -75,6 +75,8 @@ class Settings:
     market_ticker: str = "SPY"                       # S&P 500 fund, to separate company news from market moves
     reaction_edges: tuple[float, ...] = (-2.0, -0.5, 0.5, 2.0)   # in typical daily moves since the filing
     reaction_labels: tuple[str, ...] = ("big fall", "fall", "small", "rise", "big rise")
+    prior_strength: int = 20                         # pseudo-events pulling small samples toward all events
+    base_rate_scale: float = 0.02                    # how fast a base-rate score moves away from 0.5
     news_days: int = 14                              # GDELT headlines before the forecast date
     tone_base_days: int = 60
     news_story_sim: float = 0.6
