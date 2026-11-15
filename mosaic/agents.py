@@ -88,8 +88,8 @@ def same_story(items: list[dict], company: str) -> list[dict]:
     return kept
 
 
-def _evidence_item(hit: dict, full: dict) -> dict:
-    return {**hit, "published": published(full), "coverage": [],
+def _evidence_item(hit: dict, full: dict, as_of) -> dict:
+    return {**hit, "published": published(full), "coverage": [], "lag_days": max((as_of - published(full)).days, 1),
             "full_text": full.get("text") or " | ".join(full["headlines"]),
             "event": full["event"], "reaction": full["reaction"], "novelty": full["novelty"]}
 
@@ -123,7 +123,7 @@ def research(state: dict, run: Run, agent: str = "research", full_text: bool = F
         notes.append(f"{a['action']}('{query}') -> {len(hits)}")
         for h in hits:
             if h["id"] not in pool or h["score"] > pool[h["id"]]["score"]:
-                pool[h["id"]] = _evidence_item(h, tools.passage(h["id"]))   # code adds the full passage
+                pool[h["id"]] = _evidence_item(h, tools.passage(h["id"]), req["as_of"])   # code adds the full passage
     searched = any(o["tool"] == "search_documents" and "note" not in o for o in observations)
     if not searched and not state.get("evidence"):
         try:                                            # safety net: the model never searched the filings
@@ -132,7 +132,7 @@ def research(state: dict, run: Run, agent: str = "research", full_text: bool = F
             return {"error": [f"research: {exc}"], "_note": "search_documents unavailable"}
         notes.append(f"no filing search by the model; code listed {len(hits)} recent filings")
         for h in hits:
-            pool.setdefault(h["id"], _evidence_item(h, tools.passage(h["id"])))
+            pool.setdefault(h["id"], _evidence_item(h, tools.passage(h["id"]), req["as_of"]))
     items = same_story(sorted(pool.values(), key=lambda e: -e["score"]), req["company"])[:SETTINGS.k_final]
     items = [handoff("evidence", e) for e in sorted(items, key=lambda e: e["published"], reverse=True)]
     for e in items:                                     # for the leakage audit
@@ -175,7 +175,7 @@ def read_item(item: dict, feedback: list, run: Run, agent: str = "synthesis", ju
         v = run.ask(judge, JUDGE_TASK, {"passage": item["full_text"], "quote": r["quote"], "claim": r.get("reason", "")}, 30) or {}
         r["ok"] = bool(v.get("supported"))
     readings.append(dict(NO_EFFECT))
-    cm = run.tools.call("case_memory", agent, event=item["event"], reaction=item["reaction"])
+    cm = run.tools.call("case_memory", agent, event=item["event"], reaction=item["reaction"], lag_days=item.get("lag_days"))
     for r in readings:
         r["source"] = item["id"]
         r["base_rate"] = cm[r["effect"]]

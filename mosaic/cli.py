@@ -3,7 +3,7 @@
     python -m mosaic.cli --demo                       one forecast on the demo company
     python -m mosaic.cli --demo --scenario all        all nine guardrail scenarios, as a table
     python -m mosaic.cli --demo --backend anthropic   the demo company with Claude (needs ANTHROPIC_API_KEY)
-    python -m mosaic.cli AAPL --as-of 2026-07-15      a real stock (live data)
+    python -m mosaic.cli AAPL --as-of 2026-07-15      a real stock (live data; set MOSAIC_SEC_USER_AGENT)
 
 Each forecast writes report.md, state.json and trace.jsonl under runs/<ticker>-<date>/.
 """
@@ -71,12 +71,15 @@ def main(argv=None) -> int:
     if reasons:
         print("Request refused: " + "; ".join(reasons))
         return 2
+    from mosaic.live import live_world
     try:
-        from mosaic.live import live_world                # added with the live data sources
-    except ImportError:
-        print("Live data is not available in this version yet. Use --demo.")
+        world = live_world(args.ticker.upper(), as_of)
+    except ValueError as exc:                              # e.g. no SEC contact set
+        print(f"Cannot load live data: {exc}")
         return 3
-    world = live_world(args.ticker.upper(), as_of)
+    except ImportError as exc:
+        print(f"Live data needs extra packages ({exc.name}): pip install -e '.[retrieval,prices]'")
+        return 3
     state, run = run_forecast(world, make_model(args.backend, model_name=args.model))
     print(f"{state['final']['status']}, review: {state['final'].get('review')} -> {save(state, run, out)}")
     return 0

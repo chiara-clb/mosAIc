@@ -38,6 +38,10 @@ def test_bad_requests_are_refused(capsys):
     assert main([]) == 2
 
 
-def test_live_mode_says_when_it_is_not_available(capsys):
+def test_live_mode_explains_what_is_missing(capsys, monkeypatch):
+    from dataclasses import replace
+
+    from mosaic import edgar
+    monkeypatch.setattr(edgar, "SETTINGS", replace(edgar.SETTINGS, sec_user_agent=""))
     assert main(["AAPL", "--as-of", "2026-07-15"]) == 3
-    assert "Use --demo" in capsys.readouterr().out
+    assert "MOSAIC_SEC_USER_AGENT" in capsys.readouterr().out

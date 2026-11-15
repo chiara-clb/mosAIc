@@ -118,6 +118,9 @@ class ToolBox:
 
     def search_documents(self, query: str, k: int = SETTINGS.k_final, list_all: bool = False) -> list[dict]:
         """Filings from the last 30 days matching the query. list_all=True returns every one, at the cut-off score."""
+        hook = self.world.extra.get("search_documents")       # the live world searches its embedding index
+        if hook:
+            return hook(query=query, as_of=self.as_of, k=k, list_all=list_all)
         since = self.as_of - timedelta(days=SETTINGS.fresh_days)
         hits = []
         for f in self.world.filings:
@@ -145,7 +148,10 @@ class ToolBox:
                                        f"{s['first_seen']:%Y-%m-%d} | tone {s['tone']:+.1f}"})
         return sorted(hits, key=lambda h: -h["score"])[:k]
 
-    def case_memory(self, event: str, reaction: str | None) -> dict:
+    def case_memory(self, event: str, reaction: str | None, lag_days: int | None = None) -> dict:
+        hook = self.world.extra.get("case_rates")             # the live world counts past events from SEC and prices
+        if hook:
+            return dict(hook(event, reaction, lag_days), matched=f"{event} / {reaction}")
         cm = self.world.case_memory
         key = (event, reaction)
         return dict(cm[key], matched=f"{event} / {reaction}") if key in cm else dict(cm["*"], matched="all events")
