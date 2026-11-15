@@ -1,72 +1,118 @@
 # MosAIc build plan
 
-Build the application from the full design, checked part by part against the initial goal in `docs/design_review.md`, including the lessons from the validation notebooks (its section 5). Each step is one small commit containing the feature and its tests. Nothing is pushed without asking first.
+Deliver the final capstone (Assignment 7.1) by **23 November, 17:29**: a 1,000–1,500 word report in the course template, an 8–10 minute video (8–10 slides) and a public GitHub repository. The video is recorded on 22 November, so the system is frozen on 20 November.
 
-## Choices
+The system is the design of Checkpoints 4 to 6 (any forecast date, 21 trading days ahead, scored against option-implied probabilities). The earnings-focused variation stays out of the build and is presented as the next step.
 
-- **Order:** the full design's milestones. First the forecast definition, answer key and scoring, then the data and tools with as_of enforced, then the agent, then evaluation and the interface.
-- **LLM:** pluggable through LangChain chat models. An API model is the default; a local Hugging Face model (e.g. Qwen2.5-3B on Colab) is an option. Temperature 0 and the model version are recorded in every run.
-- **Frameworks (Checkpoint 4):** LangChain for the research tools and the ToT generator, evaluator and controller; MCP servers (official `mcp` SDK) for case memory, the document index and the branch log; CrewAI for the agent roles.
-- **Testable core:** logic lives in plain modules with small interfaces (fetcher, embedder, price source, option-chain source, chat model), so every feature is tested offline with fakes. Framework wrappers sit on top.
+Working rules: a plan before code, one small commit per feature with its tests, nothing pushed without asking first.
 
-## Steps (one commit each)
+## Where we are
 
-### A. Forecast definition and evaluation target
+- **Package (`mosaic/`):** settings and the 30-stock universe, buckets, answer key from option chains, scoring. Tested.
+- **Notebooks, tested through their core cells:**
+  - `tot_validation`: filings, search, prices, results dates, case memory with the price reaction, GDELT news, Tree of Thought.
+  - `baseline_comparison`: baseline versions A to D.
+  - `multi_agent`: the five agents, tools behind `mcp_call`, LangGraph flow, critic, retries and fallback, risk gate, analyst review, nine scenarios.
+- **Write-ups:** Checkpoints 4, 5 and 6, design review, presentation notes.
 
-| # | Commit | Tests |
-| --- | --- | --- |
-| 0 | Scaffold: `pyproject.toml` with extras, `config.py` with all design values and the 30-stock universe, pytest, `.gitignore`, plan and design review | Config matches the design values; 30 unique tickers |
-| 1 | `buckets.py`: σ from one year of prices, thresholds, realised bucket of a 21-day return | Synthetic prices; only prices up to the as-of date are used |
-| 2 | `answer_key.py`: implied bucket probabilities from an option chain, chain quality checks, unscorable dates logged | Chains built from a known distribution give back its probabilities; thin chains rejected |
-| 3 | `scoring.py`: log loss and total variation distance to implied probabilities, Brier score vs outcomes, confidence intervals resampled by week | Hand-computed values; perfect forecast scores best |
+Most of what is left is moving tested notebook code into the package, plus the option-data loader, the evaluation run, the README and the deliverables.
 
-### B. Data and tools, with as_of enforced
+## Two ways to run it
 
-| # | Commit | Tests |
-| --- | --- | --- |
-| 4 | `trace.py`: JSONL trace and leakage audit | Planted late source is caught |
-| 5 | `edgar.py`: download, clean, sections, chunks, answer-key leakage filter | Fixture filings; sentences quoting implied moves dropped |
-| 6 | `index.py`: embeddings, date-filtered search, MMR, "nothing found" at 0.20 (a setting); boilerplate filter; every filing in the 30-day window as a candidate (passage closest to its item title); `select_evidence`: pool searches and filing candidates, best passage per filing, MMR to 5 (design review 3.8, 5.2) | Hand-made vectors: no late chunks, MMR drops near-copies, threshold; short 8-Ks missed by the searches are still found; one passage per filing, at most 5 |
-| 7 | `prices.py` and `coordinator.py`: price loader (stocks and the S&P 500 fund), results dates from 8-K item 2.02 kept one per quarter (last before each 10-Q / 10-K), results-day rule (after 20:00 UTC = next day), earnings-in-window estimate, warning for stocks with too few results dates (XOM) | Window edges; no later data; interim updates skipped; after-close filings move the next day |
-| 8 | `baseline.py`: version C (recent moves without results days, blended half and half with the past year), results-day jump when results are due, version E option (root mean square of the last 8 jumps), optional frozen ratio, fallback (design review 5.1) | Steady volatility gives about 31/38/31; a fresh results-day jump does not inflate C; earnings widens both tails; E vs C on synthetic jumps |
-| 9 | `ledger.py`: fall, gain, wider spread, no effect; cap; a 1% floor that holds after rescaling | Each line sums to zero; cap scales all lines together; floor holds |
-| 10 | `novelty.py`: compare with the same section (matched by title) of the previous filing; similarity rescaled between 0.5 and 0.95; neutral for news | Repeated wording low, new wording high; 10-K counts as previous report for a 10-Q |
-| 11 | `case_memory.py`: event base rates from 8-K items and prices, at the same delay; price reaction against the S&P 500 and base rates conditioned on it; "any event" rates for news; past-ledger table | Synthetic events give the expected rates; only windows ended before the forecast date; drift after big falls found; market-wide moves are not company reactions |
-| 11b | `news.py`: GDELT client (cached, 5-second spacing), headline parsing with the answer-key leakage filter, stories, tone shift, same-story rule (design review 5.3) | Fake GDELT replies: later and option-related headlines dropped; stories need 2 articles; coverage linked to a filing within 3 days; at most 2 news items |
+- **Demo mode (no API key):** the synthetic Acme world and the scripted model. Runs in seconds and shows every guardrail. This is what a reviewer runs first.
+- **Live mode:** real SEC filings, GDELT news and prices, with Claude through the Anthropic API.
 
-### C. The agent
+## Schedule
+
+### A. One working system end to end (15–17 Nov)
 
 | # | Commit | Tests |
 | --- | --- | --- |
-| 12 | `llm.py`: chat model factory and structured output with a JSON fallback | Stand-in model; messy JSON parsed |
-| 13 | `research.py`: ReAct loop with LangChain tools over filings and news; agent sees headers and cleaned extracts only; reflection notes in the prompt | Scripted model: step limit, repeated queries, empty results; planted instruction text never reaches the agent |
-| 14 | `mcp_servers/`: case memory, document index, branch log | In-memory MCP client calls each tool |
-| 15 | `tot.py`: beam search synthesis; generator sees each passage with its price reaction, news coverage and tone; every node serialised as a JSON record (id, parent, readings, scores) in the branch log | Node records round-trip through the branch log; beam of 3; all-"no effect" ledger kept (only with 2+ slots); grounding and date failures pruned; 0.3 rule; ties to smaller shift; 25-call budget |
-| 16 | `critic.py` and `reflection.py`: final checks, entailment check, notes | Each rejection rule; notes written and read back |
-| 17 | `pipeline.py` and `crew.py`: run_forecast with retries and baseline fallback; run record with model version and seed; CrewAI roles | Fakes end to end; leakage audit clean; CrewAI test skips if not installed |
+| 1 | `trace.py`: run trace and leakage audit (nothing dated after the forecast date) | A planted late source is caught |
+| 2 | `world.py` + `tools.py`: the synthetic demo world and the tools behind `mcp_call` (role check, forecast-date rule, cleaned extracts, failure switch) | Ported from the notebook tests |
+| 3 | `llm.py`: `Model` with call budget, JSON parsing, scripted model, Anthropic and Hugging Face backends | Budget, parsing, scripted replies; the API backend with a fake client |
+| 4 | `agents.py`: coordinator, quant, research (with guards), synthesis (ToT), critic, finalise, fallback | Ported agent tests |
+| 5 | `risk.py`: risk gate, analyst review, review log | Ported review tests |
+| 6 | `graph.py`: the LangGraph flow; `run_forecast` | Ported graph and scenario tests (offline stand-in) |
+| 7 | `cli.py`: `python -m mosaic.cli --demo` and `python -m mosaic.cli AAPL --as-of 2026-07-15`, writing the forecast, ledger and trace as Markdown and JSON | CLI on the demo world |
 
-### D. Evaluation and interface
+### B. Live data (17–18 Nov)
 
 | # | Commit | Tests |
 | --- | --- | --- |
-| 18 | `evaluate.py`: baselines (fixed guess, price-only, prompt-only with its average-answer check, no retrieval, no news, no ToT) and ablations, a sweep over beam width, pruning margin and depth, search vs scoring errors; five test scenarios (after results, mid-quarter, results coming, event days, random weeks) reported separately; `forward_log.py` with hashes | Each baseline runs on fakes; scenario dates as specified; edited record fails the hash |
-| 19 | Streamlit app: forecast, ledger, tree, trace, audit; interactive mode (strike, resize, add lines, plain-language assumptions); implied probabilities shown only after the forecast | UI helpers; AppTest smoke test when installed |
-| 20 | README: setup, API keys, Colab, building the index, running tests | — |
+| 8 | `edgar.py` + `index.py`: filings, sections, chunks, embeddings, search, filing candidates (from the ToT notebook) | Fixture filings; no late chunks; boilerplate filter |
+| 9 | `prices.py` + `baseline.py`: prices, results dates, baseline C | Ported baseline tests |
+| 10 | `case_memory.py` + `news.py`: base rates with the price reaction, GDELT stories, same-story rule | Ported tests |
+| 11 | `live.py`: the live world behind the same tools, with caching | Fakes for each source |
 
-## Decisions (from the design review)
+### C. Evaluation (18 Nov)
 
-1. **Answer key** (3.1): decided. The calculation is built now against a standard option-chain format and tested on synthetic chains. The data provider is chosen later, then a loader is added.
-2. **Baseline** (3.2, 5.1): decided, version C; version E to test. The option-based correction ratio stays open until the FirstRate data is loaded.
-3. **Prompt injection guard** (3.3): decided, option A. The research agent sees each result's header, score and a cleaned extract of about 40 words; full passages go only to the synthesis step, which has no tools.
-4. **Metrics** (3.4): decided. Main metric is log loss against the implied probabilities, with total variation distance alongside; Brier score against outcomes is secondary. ToT weights are tuned on the main metric, on dates kept apart from the test dates. Checkpoint 4 needs one sentence changed to match.
-5. **The 30 stocks:** proposed list in `mosaic/config.py` (about 3 per sector; AAPL, NKE and INTC kept from the checkpoint runs).
-6. **Market information** (5.3): decided. Price reaction in case memory, then GDELT news (free) with the same-story rule.
-7. **Option data:** FirstRate Data end-of-day files; a loader for them is added to the answer key once the file layout is known.
+| # | Commit | Tests |
+| --- | --- | --- |
+| 12 | `firstrate.py`: loader for the FirstRate files into the standard chain format | Fixture file in the real layout |
+| 13 | `evaluate.py`: run on many dates; log loss against the answer key; calibration; variants (baseline, prompt only, baseline + memory, single pass, ToT); memory check | Fakes end to end |
+| 14 | Evaluation run with Claude Haiku on dates after June 2026 (the model's knowledge cutoff); results saved to `results/` | — |
 
-## Testing here vs on your machine
+### D. Show and document (19 Nov)
 
-This workspace can't reach PyPI, SEC EDGAR, Yahoo Finance or Hugging Face, and LangChain, CrewAI, Streamlit and sentence-transformers aren't installed. Steps 0–11, 14–16 and the logic in 17–18 are tested here with fakes. Tests needing LangChain, CrewAI or Streamlit skip when missing and must be run on your machine or Colab, as must the first live run.
+| # | Commit | Tests |
+| --- | --- | --- |
+| 15 | `app.py`: Streamlit screen over `run_forecast` (forecast, ledger, tree, trace, risk gate, analyst review). First to drop if time is short | AppTest smoke test when installed |
+| 16 | README: problem, architecture, setup, demo and live runs, tests, results, repository map | — |
+| 17 | Repository tidy-up: sample outputs, evaluation artefacts, figures | — |
+
+**20 Nov:** freeze, fix what broke, report draft. **21 Nov:** slides. **22 Nov:** record and upload. **23 Nov:** final checks and submit.
+
+## Model and the memory problem
+
+- **Live and evaluation runs:** Claude through the API. `claude-haiku-5-5` for large runs, `claude-sonnet-5-5` for the demo.
+- **Both have a reliable knowledge cutoff of June 2026.** For 2025 and early 2026 dates they may remember what happened next. The main evaluation therefore uses forecast dates from July 2026 onward, and a memory check asks the model what each stock did after each test date and drops dates it knows.
+- **Qwen 2.5 (training data before 2025)** can still run the earlier dates as a comparison free of this problem.
+
+## Report (course template) and where each section comes from
+
+| Template section | Source |
+| --- | --- |
+| 1. Project title | MosAIc and a one-line description |
+| 2. Problem and user | Checkpoint 1; the analyst as user |
+| 3. Goal and scope | The forecast definition, the answer key, the 30 stocks, public data only, options for evaluation only |
+| 4. Final architecture | Checkpoint 5 (five agents, LangGraph, MCP-style tools), Checkpoint 4 (ToT), Checkpoint 6 (guardrails, risk gate) |
+| 5. Design evolution | Checkpoints 1–6 and the design review: baseline C, filing-first evidence, news and the same-story rule, the critic's reasons, the research guards |
+| 6. Implementation | The package, LangGraph, CrewAI role cards, Claude API, sentence-transformers, SEC EDGAR, GDELT, FirstRate |
+| 7. Evaluation and results | The evaluation run (C14), the nine scenarios, the protocol comparison |
+| 8. Safety and reliability | Checkpoint 6 and the notebook scenarios |
+| 9. Limitations and next steps | The hostile review; the earnings-focused calibration experiment |
+| 10. Repository | The public link |
+
+## Video (8–10 slides, 8–10 minutes)
+
+1. Problem and user
+2. Goal and how it is scored (the answer key)
+3. Architecture (Figure 1)
+4. Live demo: one forecast with its ledger, trace and risk gate
+5. Tree of Thought: why and how
+6. Guardrails and human review (scenarios 3, 7, 9)
+7. Evaluation results
+8. What the hostile review found, and the earnings-focused next step
+9. Repository and how to run it
+
+## Needed from Chiara
+
+1. The presentation outline template.
+2. The FirstRate zip listing (file names and a few lines of one file), by 18 November.
+3. An Anthropic API key in Colab Secrets or a `.env` file (never committed).
+4. Permission to push, and to make the repository public before the 23rd.
+
+## Decisions
+
+1. **Answer key:** option-implied probabilities from a standard chain format; FirstRate loader in C12.
+2. **Baseline:** version C. Drift benchmarks and "baseline + memory" are comparison variants only.
+3. **Prompt injection guard:** research sees headers and cleaned extracts; full passages go only to synthesis, which has no search tools.
+4. **Metrics:** log loss against the implied probabilities first; calibration plots and Brier score against outcomes alongside.
+5. **Market information:** price reaction in case memory, GDELT news with the same-story rule.
+6. **Frameworks:** LangGraph runs the flow, CrewAI holds the role cards, tools sit behind one MCP-style interface.
+7. **Guardrails (Checkpoint 6):** role checks, forecast-date rule, critic with reasons and two retries, baseline fallback, risk gate (publish, flag, hold), analyst review with a feedback log.
 
 ## Later (not in this build)
 
-Topic-based superseding, λ and search cut-off tuning on labelled queries, real earnings calendar, past news in case memory. Experiments on choosing the five evidence items, compared with MMR on the same past dates: a reranking model (seen in class) and one passage per topic.
+The earnings-focused version: forecasts right after after-close results releases for 1 day, 1 week and 1 month, compared by calibration with the price-history baseline, the options at the day-X close, and the options with a statistical correction. Also: analyst estimates from Alpha Vantage, the results press release (Exhibit 99.1), a measured base rate for "no effect", a reranking model for evidence selection.
