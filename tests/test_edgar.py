@@ -1,0 +1,88 @@
+import json
+from datetime import datetime, timezone
+
+from mosaic import edgar
+
+UTC = timezone.utc
+FILLER = " ".join(["word"] * 60)
+
+PAGES = {
+    "https://data.sec.gov/submissions/CIK0000000042.json": json.dumps({
+        "name": "Acme Robotics Inc.",
+        "filings": {"recent": {
+            "form": ["8-K", "10-Q", "S-8"],
+            "filingDate": ["2025-05-28", "2025-05-09", "2025-05-01"],
+            "acceptanceDateTime": ["2025-05-28T21:05:00.000Z", "2025-05-09T20:30:00.000Z", "2025-05-01T12:00:00.000Z"],
+            "accessionNumber": ["0000042-25-000010", "0000042-25-000009", "0000042-25-000008"],
+            "primaryDocument": ["acme-8k.htm", "acme-10q.htm", "s8.htm"],
+            "items": ["5.02,9.01", "", ""]},
+            "files": []}}),
+    "https://www.sec.gov/Archives/edgar/data/42/000004225000010/index.json": json.dumps(
+        {"directory": {"item": [{"name": "acme-8k.htm"}, {"name": "ex99-1.htm"}, {"name": "logo.jpg"}]}}),
+    "https://www.sec.gov/Archives/edgar/data/42/000004225000010/acme-8k.htm":
+        "<html><body><p>Item 5.</p><p>02 Departure of Certain Officers</p><p>On May 27, 2025, Jane Doe "
+        "notified the Company of her decision to resign as Chief Financial Officer. " + FILLER + "</p>"
+        "<script>var x=1;</script></body></html>",
+    "https://www.sec.gov/Archives/edgar/data/42/000004225000010/ex99-1.htm":
+        "<html><body><p>Acme announces CFO transition. Options traders priced an implied move of 8%. " + FILLER +
+        "</p></body></html>",
+    "https://www.sec.gov/Archives/edgar/data/42/000004225000009/acme-10q.htm":
+        "<html><body><p>Item 1. Legal Proceedings</p><p>From time to time the Company is involved in legal "
+        "proceedings. " + FILLER + "</p><p>Item 1A. Risk Factors</p><p>Risks remain. " + FILLER + "</p></body></html>",
+}
+
+
+class Resp:
+    def __init__(self, body):
+        self.text = body
+
+    def json(self):
+        return json.loads(self.text)
+
+
+def get(url):
+    return Resp(PAGES[url])
+
+
+def test_list_filings_keeps_only_reports_and_8ks():
+    name, rows = edgar.list_filings(42, get)
+    assert name == "Acme Robotics Inc." and [r["form"] for r in rows] == ["8-K", "10-Q"]
+
+
+def test_item_numbers_split_by_html_are_rejoined():
+    assert edgar.clean_title("Item 5. 02 Departure of Certain Officers") == "Item 5.02 Departure of Certain Officers"
+    assert edgar.section_key("Item 5.02 Departure of Certain Officers") == "departure of certain officers"
+    assert edgar.section_key("Item 1A. Risk Factors") == "risk factors"
+
+
+def test_8k_brings_its_press_release_and_drops_answer_key_sentences():
+    _, rows = edgar.list_filings(42, get)
+    chunks = edgar.filing_chunks("ACME", "Acme Robotics Inc.", 42, rows[0], get)
+    sections = {c["section"] for c in chunks}
+    assert sections == {"Item 5.02 Departure of Certain Officers", "Press release"}
+    assert all(c["event"] == "8-K 5.02" for c in chunks)
+    assert all(c["accepted"] == datetime(2025, 5, 28, 21, 5, tzinfo=UTC) for c in chunks)
+    text = " ".join(c["text"] for c in chunks)
+    assert "implied move" not in text and "CFO transition" in text and "var x" not in text
+
+
+def test_build_corpus_respects_the_window_and_keeps_sections():
+    _, rows = edgar.list_filings(42, get)
+    corpus = edgar.build_corpus("ACME", "Acme Robotics Inc.", 42, rows,
+                                datetime(2025, 5, 1, tzinfo=UTC), datetime(2025, 5, 20, tzinfo=UTC), get)
+    assert {c["form"] for c in corpus} == {"10-Q"}
+    assert {c["section_key"] for c in corpus} == {"legal proceedings", "risk factors"}
+    assert len({c["id"] for c in corpus}) == len(corpus)
+
+
+def test_chunking_and_event_keys():
+    chunks = edgar.chunk_words(" ".join(f"w{i}" for i in range(300)), size=150, overlap=30)
+    assert len(chunks) == 3 and chunks[1].split()[0] == "w120"
+    assert edgar.chunk_words("too short") == []
+    assert edgar.event_key("8-K", "9.01") == "8-K other" and edgar.event_key("10-K", "") == "10-K"
+
+
+def test_sec_getter_needs_a_contact():
+    import pytest
+    with pytest.raises(ValueError):
+        edgar.sec_getter(user_agent="")
