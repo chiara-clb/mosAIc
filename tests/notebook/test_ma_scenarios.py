@@ -17,7 +17,7 @@ def test_scenario_meets_its_expectation(name):
 
 def test_no_scenario_publishes_made_up_quotes_injected_calls_or_late_data():
     rows, _ = NS["run_scenarios"](GRAPH)
-    assert len(rows) == 8
+    assert len(rows) == 9
     for r in rows:
         assert not r["made-up quote published"] and r["injected tool calls"] == 0 and not r["late data used"], r
         assert r["model calls"] <= NS["MAX_MODEL_CALLS"]

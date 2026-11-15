@@ -42,11 +42,12 @@ class Compiled:
 
     def invoke(self, state, config=None):
         g, state = self.g, dict(state)
+        limit = (config or {}).get("recursion_limit", self.limit)
         active = [d for s, d in g.edges if s == START]
         seen = [set() for _ in g.joins]
         self.steps = []
         while active:
-            if len(self.steps) >= self.limit:
+            if len(self.steps) >= limit:
                 raise RecursionError("recursion limit reached")
             self.steps.append(list(active))
             snapshot = dict(state)

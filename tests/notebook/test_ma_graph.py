@@ -49,7 +49,7 @@ def test_quant_and_research_run_in_the_same_step_and_synthesis_waits():
     g = graph()
     state, summary = NS["run_forecast"](g)
     assert g.steps[:3] == [["coordinator"], ["quant", "research"], ["synthesis"]]
-    assert summary["path"] == "coordinator → quant → research → synthesis → critic → finalise"
+    assert summary["path"] == "coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish"
     assert summary["status"] == "accepted" and summary["items right"] == "4/4"
     assert summary["model calls"] <= NS["MAX_MODEL_CALLS"]
 
@@ -59,7 +59,10 @@ def test_every_route_out_of_the_critic_is_wired():
     fn, mapping = g.g.cond["critic"]
     assert set(mapping) == set(NS["ROUTES"]) and fn is NS["route_after_critic"]
     assert ("research_more", "synthesis") in g.g.edges
-    assert {("finalise", lg.END), ("fallback", lg.END)} <= set(g.g.edges)
+    assert {("finalise", "risk_gate"), ("fallback", "risk_gate")} <= set(g.g.edges)
+    fn, mapping = g.g.cond["risk_gate"]
+    assert mapping == {"publish": "publish", "flag": "flag", "hold": "hold"} and fn is NS["route_after_risk"]
+    assert {(n, lg.END) for n in ("publish", "flag", "hold")} <= set(g.g.edges)
 
 
 def test_latency_counts_the_parallel_branch_once():
