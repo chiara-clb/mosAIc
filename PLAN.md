@@ -32,8 +32,9 @@ Most of what is left is moving tested notebook code into the package, plus the o
 | 2 | `world.py` + `tools.py`: the synthetic demo world and the tools behind `mcp_call` (role check, forecast-date rule, cleaned extracts, failure switch) | Ported from the notebook tests |
 | 3 | `llm.py`: `Model` with call budget, JSON parsing, scripted model, Anthropic and Hugging Face backends | Budget, parsing, scripted replies; the API backend with a fake client |
 | 4 | `agents.py`: coordinator, quant, research (with guards), synthesis (ToT), critic, finalise, fallback | Ported agent tests |
-| 5 | `risk.py`: risk gate, analyst review, review log | Ported review tests |
+| 5 | `risk.py`: risk gate, analyst review, review log; a refused tool call (an attempt to act on something the model read) is a trigger, so it never goes out unflagged (Lab 6.2) | Ported review tests; scenario 7 is flagged |
 | 6 | `graph.py`: the LangGraph flow; `run_forecast` | Ported graph and scenario tests (offline stand-in) |
+| 6b | `request.py`: request check before any run (ticker in the universe, date not in the future, a year of prices, sources reachable); a failed check refuses the run with the reason (Lab 6.1, pre-generation) | Each refusal reason; a valid request passes |
 | 7 | `cli.py`: `python -m mosaic.cli --demo` and `python -m mosaic.cli AAPL --as-of 2026-07-15`, writing the forecast, ledger and trace as Markdown and JSON | CLI on the demo world |
 
 ### B. Live data (17–18 Nov)
@@ -50,7 +51,8 @@ Most of what is left is moving tested notebook code into the package, plus the o
 | # | Commit | Tests |
 | --- | --- | --- |
 | 12 | `firstrate.py`: loader for the FirstRate files into the standard chain format | Fixture file in the real layout |
-| 13 | `evaluate.py`: run on many dates; log loss against the answer key; calibration; variants (baseline, prompt only, baseline + memory, single pass, ToT); memory check | Fakes end to end |
+| 13 | `evaluate.py`: run on many dates; log loss against the answer key; calibration; variants (baseline, prompt only, baseline + memory, single pass, ToT); memory check; guardrail ablation (each guardrail switched off in turn on the scenarios: critic, cleaned extracts, role check, risk gate) (Lab 6.1) | Fakes end to end; each ablation lets its planted failure through |
+| 13b | Optional, if time allows: the risk triggers as a 0–100 score, with the hold threshold set from the evaluation run to a target review rate (Lab 6.2) | Threshold gives the target rate on a fixed sample |
 | 14 | Evaluation run with Claude Haiku on dates after June 2026 (the model's knowledge cutoff); results saved to `results/` | — |
 
 ### D. Show and document (19 Nov)
@@ -111,7 +113,7 @@ Most of what is left is moving tested notebook code into the package, plus the o
 4. **Metrics:** log loss against the implied probabilities first; calibration plots and Brier score against outcomes alongside.
 5. **Market information:** price reaction in case memory, GDELT news with the same-story rule.
 6. **Frameworks:** LangGraph runs the flow, CrewAI holds the role cards, tools sit behind one MCP-style interface.
-7. **Guardrails (Checkpoint 6):** role checks, forecast-date rule, critic with reasons and two retries, baseline fallback, risk gate (publish, flag, hold), analyst review with a feedback log.
+7. **Guardrails (Checkpoint 6, Labs 6.1 and 6.2):** request check before the run, role checks, forecast-date rule, critic with reasons and two retries, baseline fallback, risk gate (publish, flag, hold) including refused tool calls as a trigger, analyst review with a feedback log, and a guardrail ablation in the evaluation.
 
 ## Later (not in this build)
 
