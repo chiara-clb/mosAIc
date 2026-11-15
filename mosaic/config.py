@@ -93,6 +93,12 @@ class Settings:
     prune_margin: float = 0.3         # drop nodes more than this below the best
     keep_no_effect_min_beam: int = 2  # the all-"no effect" node is guaranteed only with 2+ slots
 
+    # --- Risk gate (Checkpoint 6): no trigger -> publish, one -> flag, two or more -> hold ---
+    risk_high_impact: float = 10.0    # an outcome moved this many points from the baseline
+    risk_single_source: float = 5.0   # a move this large resting on one ledger line
+    risk_rare_cases: int = 30         # fewer past cases than this behind a line: thin evidence
+    risk_low_confidence: float = 0.5  # the model's own probability that a chosen reading is right
+
     # --- Evaluation (design review 3.4) ---
     main_metric: str = "log_loss_implied"
     tuning_metric: str = "log_loss_implied"
