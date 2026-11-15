@@ -7,13 +7,13 @@ The graph (mosaic/graph.py) decides the order.
 
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 
 import numpy as np
 
+from mosaic.baseline import baseline
 from mosaic.config import OUTCOMES, SETTINGS
 from mosaic.handoffs import handoff, problems_baseline, problems_reading
 from mosaic.ledger import apply_ledger, direction, floor_and_normalise, shift_for, total_shift
@@ -47,36 +47,15 @@ def coordinator(state: dict, run: Run) -> dict:
             "_note": f"results {'due' if due else 'not due'} within the month"}
 
 
-def norm_cdf(x: float) -> float:
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
-
-def baseline_from_closes(closes: list[float], results_in_window: bool) -> dict[str, float]:
-    """Version C: recent moves (weights 0.94 per day) blended half and half with the past year.
-
-    The live baseline also leaves results days out of the recent moves (mosaic/baseline.py, block B).
-    """
-    r = np.diff(np.log(np.array(closes, dtype=float)))[-SETTINGS.sigma_lookback_days:]
-    var_year = float(np.var(r))
-    ew = 0.0
-    for x in r:
-        ew = SETTINGS.ewma_decay * ew + (1 - SETTINGS.ewma_decay) * x * x
-    var_daily = SETTINGS.blend_recent * ew + (1 - SETTINGS.blend_recent) * var_year
-    if results_in_window:
-        var_daily *= 1.3                                 # stand-in for the results-day jump
-    thr = SETTINGS.bucket_k * math.sqrt(var_year * SETTINGS.horizon_days)
-    sd = math.sqrt(var_daily * SETTINGS.horizon_days)
-    tail = 100 * norm_cdf(-thr / sd)
-    return floor_and_normalise({"fall": tail, "flat": 100 - 2 * tail, "gain": tail})
-
-
 def quant(state: dict, run: Run) -> dict:
     try:
         px = run.tools.call("market_data", "quant", kind="prices")
+        cal = run.tools.call("market_data", "quant", kind="earnings")
     except ToolError as exc:
         return {"error": [f"quant: {exc}"], "_note": "market data unavailable"}
-    base = baseline_from_closes(px["stock"], state["plan"]["results_in_window"])
-    return {"baseline": handoff("baseline", base), "_note": f"baseline {base}"}
+    base, info = baseline(px["dates"], px["stock"], state["request"]["as_of"], cal["past_results"],
+                          state["plan"]["results_in_window"])
+    return {"baseline": handoff("baseline", base), "_note": f"baseline {base} ({info.get('fallback') or 'version ' + info['version']})"}
 
 
 # --- research ----------------------------------------------------------------------------------

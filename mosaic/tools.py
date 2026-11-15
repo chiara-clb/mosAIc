@@ -110,9 +110,10 @@ class ToolBox:
             return {"dates": [w.prices["dates"][i] for i in keep], "stock": [w.prices[w.ticker][i] for i in keep],
                     "market": [w.prices["SPY"][i] for i in keep]}
         if kind == "earnings":
-            past = [d for d in w.earnings_dates if d < self.as_of]
-            last = max(past) if past else None
-            return {"last_results": last, "next_estimate": last + timedelta(days=91) if last else None}
+            past = sorted(d for d in w.earnings_dates if d < self.as_of)
+            last = past[-1] if past else None
+            return {"last_results": last, "next_estimate": last + timedelta(days=91) if last else None,
+                    "past_results": past}
         raise ValueError(f"unknown market data {kind!r}")
 
     def search_documents(self, query: str, k: int = SETTINGS.k_final, list_all: bool = False) -> list[dict]:
