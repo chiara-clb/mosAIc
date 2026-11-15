@@ -16,6 +16,7 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "pydantic>=2.5",
+    "langgraph>=0.2",
 ]
 
 [project.optional-dependencies]
