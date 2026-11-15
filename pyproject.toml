@@ -24,7 +24,7 @@ retrieval = ["sentence-transformers>=3.0"]
 # Daily prices
 prices = ["yfinance>=0.2.40"]
 # LLM through LangChain, API models (default)
-llm = ["langchain-core>=0.3", "langchain-anthropic>=0.3", "langchain-openai>=0.3"]
+llm = ["anthropic>=0.40", "langchain-core>=0.3", "langchain-anthropic>=0.3"]
 # Local Hugging Face model, e.g. Qwen2.5-3B on Colab
 local = ["langchain-huggingface>=0.1", "transformers>=4.44", "accelerate>=0.33", "torch>=2.3"]
 # Agent roles and shared state (Checkpoint 4)

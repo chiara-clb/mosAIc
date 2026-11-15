@@ -102,6 +102,7 @@ class Settings:
     llm_provider: str = field(default_factory=lambda: os.environ.get("MOSAIC_LLM_PROVIDER", "anthropic"))
     llm_model: str = field(default_factory=lambda: os.environ.get("MOSAIC_LLM_MODEL", "claude-sonnet-5-5"))
     llm_temperature: float = 0.0
+    run_model_budget: int = 40        # model calls for a whole forecast, retries included
     seed: int = 0
 
     # --- Files ---
