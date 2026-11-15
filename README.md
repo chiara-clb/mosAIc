@@ -35,18 +35,29 @@ Results so far are in [docs/results.md](docs/results.md).
 
 | Path | What it is |
 | --- | --- |
-| `mosaic/` | The Python package. Currently the forecast definition, the option-based answer key, scoring and the run trace |
+| `mosaic/` | The Python package: the agents, tools, graph, guardrails, risk gate, demo world and scenarios, the option-based answer key and scoring, and the command-line tool |
 | `notebooks/` | Three tested notebooks: the Tree of Thought step on real filings, the baseline comparison, and the full multi-agent system with its guardrails. See [notebooks/README.md](notebooks/README.md) |
 | `tests/` | Tests for the package and for the notebooks' code |
 | `docs/design.md` | The design, the main decisions and how they changed during the program |
 | `docs/results.md` | What the notebooks showed |
 | `docs/figures/` | Architecture diagrams |
 
-The agent code is being moved from the notebooks into the package, with a command-line tool. Until then, the multi-agent notebook is the way to run the whole system.
+The full system runs from the package on the demo company. Live SEC, news and price data are being moved into the package from the notebooks.
 
 ## Running it
 
-**The multi-agent system, no setup needed:** open `notebooks/multi_agent/checkpoint5_multi_agent.ipynb` in Google Colab and choose Run all. It runs in seconds on a small synthetic company and shows nine scenarios, including the guardrails at work. To use a real model, set `MODE = "real"` in section 1 (needs a GPU runtime for Qwen, or an Anthropic API key).
+**From the command line** (Python 3.10 or later):
+
+```bash
+pip install -e .
+python -m mosaic.cli --demo                         # one forecast on the demo company
+python -m mosaic.cli --demo --scenario all          # the nine guardrail scenarios
+python -m mosaic.cli --demo --backend anthropic     # the demo company with Claude (needs ANTHROPIC_API_KEY)
+```
+
+Each forecast writes `report.md` (probabilities, ledger, review decision), `state.json` and `trace.jsonl` (every step and tool call, with the leakage audit) under `runs/`. Live data for real stocks is being added.
+
+**In a notebook, no setup needed:** open `notebooks/multi_agent/checkpoint5_multi_agent.ipynb` in Google Colab and choose Run all. It runs in seconds on a small synthetic company and shows nine scenarios, including the guardrails at work. To use a real model, set `MODE = "real"` in section 1 (needs a GPU runtime for Qwen, or an Anthropic API key).
 
 **The tests, locally:**
 
