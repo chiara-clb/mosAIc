@@ -23,8 +23,10 @@ def render_markdown(state: dict, run) -> str:
         lines += ["", "**Why the baseline was reported:** " + "; ".join(final["why"])]
     lines += ["", "## Ledger", ""]
     if final["ledger"]:
-        lines += ["| Source | Effect | Size | Quote | Reason |", "| --- | --- | --- | --- | --- |"]
-        lines += [f"| {x['source']} | {x['effect']} | {x['size']} | \"{x['quote']}\" | {x.get('reason', '')} |"
+        dates = {e["id"]: e["published"] for e in state.get("evidence") or []}
+        when = lambda src: f"{dates[src]:%Y-%m-%d}" if src in dates else "-"
+        lines += ["| Source | Published | Effect | Size | Quote | Reason |", "| --- | --- | --- | --- | --- | --- |"]
+        lines += [f"| {x['source']} | {when(x['source'])} | {x['effect']} | {x['size']} | \"{x['quote']}\" | {x.get('reason', '')} |"
                   for x in final["ledger"]]
     else:
         lines.append("No adjustments: the forecast is the baseline.")

@@ -9,7 +9,8 @@ def test_demo_writes_report_state_and_trace(tmp_path, capsys):
     folder = tmp_path / "1_normal" / "ACME-2025-06-02"
     report = (folder / "report.md").read_text()
     assert "# Acme Robotics Inc. (ACME), forecast as of 2025-06-02" in report
-    assert "| F1 | spread | small |" in report and "Leakage audit: clean" in report
+    assert "| F1 | 2025-05-28 | spread | small |" in report and "Leakage audit: clean" in report
+    assert "| S2 | 2025-05-22 | gain | small |" in report
     state = json.loads((folder / "state.json").read_text())
     assert state["final"]["review"] == "publish"
     assert leakage_audit(Trace.read_jsonl(folder / "trace.jsonl")) == []
