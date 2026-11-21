@@ -324,9 +324,9 @@ def write_reports(table: pd.DataFrame, out_dir: Path) -> None:
              f"Errors: {errors}. The model claimed to remember the month after {flagged} of them.", "",
              "Lower is better for every score. Log loss against the implied probabilities is the main score when the "
              "answer key is loaded; otherwise forecasts are scored against what actually happened (noisy).", "",
-             "## All forecasts", "", summ.fillna("").to_markdown(index=False), ""]
+             "## All forecasts", "", summ.astype(object).fillna("").to_markdown(index=False), ""]
     if flagged:
-        lines += ["## Without the dates the model claims to remember", "", clean.fillna("").to_markdown(index=False), ""]
+        lines += ["## Without the dates the model claims to remember", "", clean.astype(object).fillna("").to_markdown(index=False), ""]
     lines += ["## Calibration (how often each outcome happened, by stated probability)", "",
               cal.to_markdown(index=False), ""]
     (out_dir / "summary.md").write_text("\n".join(lines), encoding="utf-8")
