@@ -97,7 +97,7 @@ Add `--limit 2` for a cheap first try. Results go to `results/evaluation/`, and 
 python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate
 ```
 
-It is also the third choice in the app's sidebar. The option code is ported from an earnings-release prototype, in which an agent that reads the release itself scored better than all three baselines on 40 releases (see the report).
+Add `--read` to let the **release reader** agent read the press release next to the baselines and the analysts' consensus (`data/consensus/<TICKER>_<date>.json`, values only). It writes a ledger with exact quotes, a critic in code checks every quote, and the ledger adjusts the option baseline. It is also the third choice in the app's sidebar. The option code and the ledger rule come from an earnings-release prototype, in which such an agent scored better than all three baselines on 40 releases (see the report).
 
 **In the browser** (a simple Streamlit screen):
 

@@ -187,6 +187,9 @@ def main(argv=None) -> int:                                        # pragma: no 
     p.add_argument("ticker")
     p.add_argument("release_day", help="the day of the after-close release, YYYY-MM-DD")
     p.add_argument("--options-dir", default=None)
+    p.add_argument("--read", action="store_true", help="also run the release reader (Claude, needs ANTHROPIC_API_KEY)")
+    p.add_argument("--consensus-dir", default="data/consensus")
+    p.add_argument("--model", default="claude-haiku-5-5")
     a = p.parse_args(argv)
     rd = load_live(a.ticker, date.fromisoformat(a.release_day), a.options_dir)
     print(f"{rd.ticker}: results released {rd.release.astimezone(NEW_YORK):%Y-%m-%d %H:%M} New York time")
@@ -197,6 +200,20 @@ def main(argv=None) -> int:                                        # pragma: no 
         print(f"Actual: {rd.actual['move'] * 100:+.1f}% on {rd.t1} → {rd.actual['outcome']}")
     for n in rd.notes:
         print("Note:", n)
+    if a.read:
+        from mosaic.llm import make_model
+        from mosaic.release_reader import fetch_release, ledger_rows, load_consensus, read_release
+        consensus = load_consensus(a.consensus_dir, rd.ticker, rd.t0)
+        r = read_release(fetch_release(rd.ticker, rd.release), rd.baselines, rd.tau, consensus,
+                         make_model("anthropic", model_name=a.model), rd.ticker)
+        print(f"\nRelease reader: {r.status} ({len(consensus)} consensus values, {r.retries} retries)")
+        if r.read:
+            print(r.read)
+        if r.forecast:
+            print("MosAIc after the release:", r.forecast)
+        print(pd.DataFrame(ledger_rows(r)).to_string(index=False) if r.ledger else "No ledger.")
+        for f in r.flags:
+            print("Flag:", f)
     return 0
 
 
