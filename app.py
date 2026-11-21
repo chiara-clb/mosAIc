@@ -18,8 +18,8 @@ from mosaic.llm import make_model
 from mosaic.request import check_request
 from mosaic.risk import ReviewLog, apply_review
 from mosaic.scenarios import SCENARIOS, run_scenario
-from mosaic.views import (evidence_rows, forecast_rows, ledger_rows, progress_line, run_facts, step_rows, text_log,
-                          tool_rows, tot_rows)
+from mosaic.views import (evidence_rows, forecast_rows, ledger_rows, progress_line, review_summary, run_facts, step_rows,
+                          text_log, tool_rows, tot_rows)
 
 st.set_page_config(page_title="MosAIc", layout="wide")
 st.title("MosAIc")
@@ -29,13 +29,14 @@ st.caption("Probability of a large fall, a flat month or a large gain over the n
 def outcome_chart(table: pd.DataFrame):
     """Baseline and forecast side by side for each outcome, in the order fall, flat, gain."""
     import altair as alt
-    long = table[["Baseline %", "Forecast %"]].reset_index().melt("Outcome", var_name="Series", value_name="Percent")
+    series = [c for c in ("Baseline %", "Forecast %", "Agent %", "Analyst %") if c in table.columns]
+    long = table[series].reset_index().melt("Outcome", var_name="Series", value_name="Percent")
     order = list(table.index)
     return (alt.Chart(long).mark_bar()
             .encode(x=alt.X("Outcome:N", sort=order, title=None, axis=alt.Axis(labelAngle=0)),
-                    xOffset=alt.XOffset("Series:N", sort=["Baseline %", "Forecast %"]),
+                    xOffset=alt.XOffset("Series:N", sort=series),
                     y=alt.Y("Percent:Q", title="%"),
-                    color=alt.Color("Series:N", sort=["Baseline %", "Forecast %"], legend=alt.Legend(orient="bottom", title=None)),
+                    color=alt.Color("Series:N", sort=series, legend=alt.Legend(orient="bottom", title=None)),
                     tooltip=["Outcome", "Series", alt.Tooltip("Percent:Q", format=".1f")])
             .properties(height=260))
 
@@ -112,7 +113,12 @@ for t in facts["triggers"]:
     st.markdown(f"- {t}")
 for w in facts["why"]:
     st.warning("Baseline reported: " + w)
-if facts["review"] == "hold" and not st.session_state.get("reviewed"):
+if review_summary(final):
+    st.success(f"**{review_summary(final)}.** The forecast below is the analyst's; the agent's estimate is shown next to it.")
+    if st.button("Undo review"):
+        st.session_state["reviewed"] = None
+        st.rerun()
+elif facts["review"] == "hold":
     st.info("Held for the analyst: review each ledger line in **Analyst review** at the bottom of the page.")
 
 left, right = st.columns([3, 2])
@@ -121,7 +127,7 @@ left.dataframe(table, use_container_width=True)
 try:
     right.altair_chart(outcome_chart(table), use_container_width=True)
 except Exception:                                              # an older Altair: plain side-by-side bars
-    right.bar_chart(table[["Baseline %", "Forecast %"]], stack=False)
+    right.bar_chart(table[[c for c in table.columns if c.endswith("%")]], stack=False)
 
 st.markdown("#### Ledger")
 rows = ledger_rows(state, final)
@@ -142,7 +148,7 @@ with tabs[2]:
 with tabs[3]:
     st.dataframe(pd.DataFrame(tool_rows(run)), use_container_width=True, hide_index=True)
 with tabs[4]:
-    log = text_log(state, run)
+    log = text_log(state, run, final)
     st.caption("Everything about this run as plain text, including the model's raw replies. "
                "Use the copy icon at the top right of the box, or download it.")
     st.download_button("Download log", log, file_name=f"{run.tools.trace.run_id}.log.txt")
