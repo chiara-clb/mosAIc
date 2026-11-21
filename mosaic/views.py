@@ -96,7 +96,9 @@ def run_facts(state: dict, run) -> dict:
 STEP_NAMES = {"coordinator": "Coordinator", "quant": "Quant agent", "research": "Research agent",
               "join": "Waiting for quant and research", "synthesis": "Synthesis agent (Tree of Thought)",
               "critic": "Critic", "finalise": "Finalising the forecast", "fallback": "Falling back to the baseline",
-              "risk_gate": "Risk gate", "publish": "Published", "flag": "Published with a flag",
+              "risk_gate": "Risk gate", "publish": "Published", "reader": "Release reader",
+              "release_reader": "Release reader", "release_research": "Research (release)",
+              "release_critic": "Critic", "flag": "Published with a flag",
               "hold": "Held for the analyst"}
 
 
