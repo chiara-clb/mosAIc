@@ -32,6 +32,8 @@ local = ["langchain-huggingface>=0.1", "transformers>=4.44", "accelerate>=0.33",
 frameworks = ["crewai>=0.80", "mcp>=2.0"]
 # CrewAI agents at runtime (--backend crewai)
 crew = ["crewai>=0.80"]
+# Serve the tools over MCP (python -m mosaic.mcp_server)
+mcp = ["mcp>=2.0"]
 # Interface
 ui = ["streamlit>=1.38"]
 dev = ["pytest>=8.0"]
