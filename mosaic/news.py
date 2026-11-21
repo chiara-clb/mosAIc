@@ -110,12 +110,13 @@ class Gdelt:
     """GDELT DOC API calls, cached on disk and spaced 5 seconds apart, as GDELT asks."""
 
     def __init__(self, cache_file: str | Path | None = None, http_get: Callable[[dict], dict] | None = None,
-                 spacing: float | None = None, retries: int = 3):
+                 spacing: float | None = None, retries: int = 1):
         self.cache_file = Path(cache_file or Path(SETTINGS.data_dir) / "gdelt_cache.json")
         self.cache = self._load()
         self.http_get = http_get or self._requests_get
         self.spacing = SETTINGS.gdelt_spacing_seconds if spacing is None else spacing
         self.retries = retries
+        self._pace = self.spacing                 # current seconds between calls; grows after refusals
         self.errors: list[str] = []          # failed calls in this session, so a run can say news was missing
         self.progress = None                  # optional callable(message), told about refusals and waits
         self._last = 0.0
@@ -153,19 +154,22 @@ class Gdelt:
             return self.cache[key]
         error = ""
         for attempt in range(self.retries + 1):
-            # After a refusal GDELT wants a real pause: 5 s, then 30 s, 90 s, 180 s with the defaults.
-            wait = (self.spacing if attempt == 0 else self.spacing * 6 * 3 ** (attempt - 1)) - (time.time() - self._last)
+            # The pace adapts: after a refusal every call waits longer (up to 40 s), and it speeds up again
+            # as calls succeed. A refused call is retried once after 60 s, then skipped for a later run.
+            wait = (self._pace if attempt == 0 else max(60.0 * attempt, self._pace)) - (time.time() - self._last)
             if attempt and self.progress:
                 self.progress(f"   GDELT refused ({error[:60]}); waiting {max(wait, 0):.0f} s, "
                               f"attempt {attempt + 1} of {self.retries + 1}")
-            if wait > 0:
+            if wait > 0 and self.spacing > 0:
                 time.sleep(wait)
             self._last = time.time()
             try:
                 payload = self.http_get(params)
             except Exception as e:                           # network error or a refusal
                 error = f"{type(e).__name__}: {e}"
+                self._pace = min(self._pace * 2, 40.0)
                 continue
+            self._pace = max(self._pace * 0.8, self.spacing)
             self.cache[key] = payload
             self._save()
             return payload

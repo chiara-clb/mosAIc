@@ -153,7 +153,22 @@ def test_refusals_and_waits_are_reported_live(tmp_path):
     g = Gdelt(tmp_path / "c.json", http_get=refuse_once, spacing=0)
     g.fetch("Intel Corporation", "INTC", AS_OF, progress=said.append)
     assert said[0].startswith("News: ") and said[0].endswith("downloading)")
-    assert said[1].startswith("   GDELT refused (RuntimeError: 429") and "attempt 2 of 4" in said[1]
+    assert said[1].startswith("   GDELT refused (RuntimeError: 429") and "attempt 2 of 2" in said[1]
     said.clear()
     g.fetch("Intel Corporation", "INTC", AS_OF, progress=said.append)
     assert all(s.endswith("saved)") for s in said)                       # second time, all from the cache
+
+
+def test_the_pace_slows_after_a_refusal_and_recovers(tmp_path):
+    calls = []
+
+    def flaky(params):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("429")
+        return {}
+
+    g = Gdelt(tmp_path / "c.json", http_get=flaky, spacing=0)      # spacing 0: no real sleeping in the test
+    g._pace = 5.0
+    g({"q": 1})
+    assert g._pace == 8.0                     # doubled to 10 on the refusal, then x0.8 on the success
