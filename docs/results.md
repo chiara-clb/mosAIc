@@ -76,6 +76,6 @@ With a real model (Qwen2.5-3B), the coordination held: the critic's hint led res
 | No cleaned extracts | 0 | 1 | 0 | 3 / 5 / 1 |
 | No role check on tools | 0 | 1 | 0 | 4 / 4 / 1 |
 | No risk gate | 0 | 0 | 0 | 9 / 0 / 0 |
-| No forecast-date rule | 0 | 0 | 7 | 2 / 5 / 2 |
+| No forecast-date rule | 0 | 0 | 8 | 1 / 6 / 2 |
 
 Each guardrail stops a different failure, and no other guardrail covers for it. Switching off either the cleaned extracts or the role check lets one hidden instruction through, so the two are not redundant. Without the risk gate every forecast is published, including the rare-event one that should wait for the analyst.

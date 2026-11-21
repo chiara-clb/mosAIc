@@ -1,6 +1,6 @@
 configuration,scenario,status,review,retries,path,items right,made-up quote published,injected tool calls,late data used,model calls,tool calls,est. seconds,forecast
 "Linear pipeline (one-way, first reading)",1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,1/4,False,0,False,16,16,36.2,37.1 / 30.7 / 32.1
-"Linear pipeline (one-way, first reading)",2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,0/4,False,0,False,13,14,29.6,39.1 / 31.7 / 29.1
+"Linear pipeline (one-way, first reading)",2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,1/4,False,0,False,16,17,36.5,37.1 / 30.7 / 32.1
 "Linear pipeline (one-way, first reading)",3 wrong reading,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,1/4,True,0,False,16,16,36.2,32.6 / 29.7 / 37.6
 "Linear pipeline (one-way, first reading)",4 missing filing,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,2/4,False,0,False,12,12,27.0,36.1 / 32.7 / 31.1
 "Linear pipeline (one-way, first reading)",5 retries used up,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,1/4,True,0,False,16,16,36.2,32.6 / 29.7 / 37.6
@@ -9,7 +9,7 @@ configuration,scenario,status,review,retries,path,items right,made-up quote publ
 "Linear pipeline (one-way, first reading)",8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,10,11,22.7,36.1 / 32.7 / 31.1
 "Linear pipeline (one-way, first reading)","9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,2/4,False,0,False,16,16,36.2,31.6 / 21.7 / 46.6
 One-way with Tree of Thought,1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-One-way with Tree of Thought,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+One-way with Tree of Thought,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 One-way with Tree of Thought,3 wrong reading,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,True,0,False,16,14,35.6,31.6 / 31.7 / 36.6
 One-way with Tree of Thought,4 missing filing,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,12,10,26.4,30.1 / 34.7 / 35.1
 One-way with Tree of Thought,5 retries used up,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,True,0,False,16,14,35.6,31.6 / 31.7 / 36.6
@@ -18,7 +18,7 @@ One-way with Tree of Thought,7 hidden instructions,accepted,flag,0,coordinator �
 One-way with Tree of Thought,8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 One-way with Tree of Thought,"9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 Critic rejects without reasons,1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-Critic rejects without reasons,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+Critic rejects without reasons,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 Critic rejects without reasons,3 wrong reading,baseline,flag,2,coordinator → quant → research → synthesis → critic → synthesis → critic → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,False,40,28,87.8,32.1 / 35.7 / 32.1
 Critic rejects without reasons,4 missing filing,baseline,flag,2,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → research_more → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,False,36,24,78.6,32.1 / 35.7 / 32.1
 Critic rejects without reasons,5 retries used up,baseline,flag,2,coordinator → quant → research → synthesis → critic → synthesis → critic → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,False,40,28,87.8,32.1 / 35.7 / 32.1
@@ -27,7 +27,7 @@ Critic rejects without reasons,7 hidden instructions,accepted,flag,0,coordinator
 Critic rejects without reasons,8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 Critic rejects without reasons,"9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 Critic with reasons (the design),1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-Critic with reasons (the design),2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+Critic with reasons (the design),2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 Critic with reasons (the design),3 wrong reading,accepted,flag,1,coordinator → quant → research → synthesis → critic → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,28,21,61.7,31.6 / 31.7 / 36.6
 Critic with reasons (the design),4 missing filing,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,23,17,50.5,31.6 / 31.7 / 36.6
 Critic with reasons (the design),5 retries used up,baseline,flag,2,coordinator → quant → research → synthesis → critic → synthesis → critic → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,False,40,28,87.8,32.1 / 35.7 / 32.1
@@ -36,7 +36,7 @@ Critic with reasons (the design),7 hidden instructions,accepted,flag,0,coordinat
 Critic with reasons (the design),8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 Critic with reasons (the design),"9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 Single agent with all tools,1 normal,accepted,none,0,coordinator → quant → analyst → finalise,4/4,False,0,False,16,12,35.6,31.6 / 31.7 / 36.6
-Single agent with all tools,2 empty search,accepted,none,0,coordinator → quant → analyst → finalise,3/4,False,0,False,13,11,29.3,33.6 / 32.7 / 33.6
+Single agent with all tools,2 empty search,accepted,none,0,coordinator → quant → analyst → finalise,4/4,False,0,False,16,13,35.9,31.6 / 31.7 / 36.6
 Single agent with all tools,3 wrong reading,accepted,none,0,coordinator → quant → analyst → finalise,3/4,True,0,False,16,12,35.6,31.6 / 31.7 / 36.6
 Single agent with all tools,4 missing filing,accepted,none,0,coordinator → quant → analyst → finalise,3/4,False,0,False,12,9,26.7,30.1 / 34.7 / 35.1
 Single agent with all tools,5 retries used up,accepted,none,0,coordinator → quant → analyst → finalise,3/4,True,0,False,16,12,35.6,31.6 / 31.7 / 36.6
@@ -45,7 +45,7 @@ Single agent with all tools,7 hidden instructions,accepted,none,0,coordinator �
 Single agent with all tools,8 late data,accepted,none,0,coordinator → quant → analyst → finalise,4/4,False,0,False,10,9,22.7,31.6 / 31.7 / 36.6
 Single agent with all tools,"9 rare event, big move",accepted,none,0,coordinator → quant → analyst → finalise,4/4,False,0,False,16,12,35.6,30.6 / 23.7 / 45.6
 All guardrails on (the design),1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-All guardrails on (the design),2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+All guardrails on (the design),2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 All guardrails on (the design),3 wrong reading,accepted,flag,1,coordinator → quant → research → synthesis → critic → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,28,21,61.7,31.6 / 31.7 / 36.6
 All guardrails on (the design),4 missing filing,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,23,17,50.5,31.6 / 31.7 / 36.6
 All guardrails on (the design),5 retries used up,baseline,flag,2,coordinator → quant → research → synthesis → critic → synthesis → critic → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,False,40,28,87.8,32.1 / 35.7 / 32.1
@@ -54,7 +54,7 @@ All guardrails on (the design),7 hidden instructions,accepted,flag,0,coordinator
 All guardrails on (the design),8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 All guardrails on (the design),"9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 No critic loop,1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-No critic loop,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+No critic loop,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 No critic loop,3 wrong reading,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,True,0,False,16,14,35.6,31.6 / 31.7 / 36.6
 No critic loop,4 missing filing,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,12,10,26.4,30.1 / 34.7 / 35.1
 No critic loop,5 retries used up,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,True,0,False,16,14,35.6,31.6 / 31.7 / 36.6
@@ -63,7 +63,7 @@ No critic loop,7 hidden instructions,accepted,flag,0,coordinator → quant → r
 No critic loop,8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 No critic loop,"9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 No cleaned extracts,1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-No cleaned extracts,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+No cleaned extracts,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 No cleaned extracts,3 wrong reading,accepted,flag,1,coordinator → quant → research → synthesis → critic → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,28,21,61.7,31.6 / 31.7 / 36.6
 No cleaned extracts,4 missing filing,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,23,17,50.5,31.6 / 31.7 / 36.6
 No cleaned extracts,5 retries used up,baseline,flag,2,coordinator → quant → research → synthesis → critic → synthesis → critic → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,False,40,28,87.8,32.1 / 35.7 / 32.1
@@ -72,7 +72,7 @@ No cleaned extracts,7 hidden instructions,accepted,flag,0,coordinator → quant 
 No cleaned extracts,8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 No cleaned extracts,"9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 No role check on tools,1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-No role check on tools,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+No role check on tools,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 No role check on tools,3 wrong reading,accepted,flag,1,coordinator → quant → research → synthesis → critic → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,28,21,61.7,31.6 / 31.7 / 36.6
 No role check on tools,4 missing filing,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,False,23,17,50.5,31.6 / 31.7 / 36.6
 No role check on tools,5 retries used up,baseline,flag,2,coordinator → quant → research → synthesis → critic → synthesis → critic → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,False,40,28,87.8,32.1 / 35.7 / 32.1
@@ -81,7 +81,7 @@ No role check on tools,7 hidden instructions,accepted,publish,0,coordinator → 
 No role check on tools,8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 No role check on tools,"9 rare event, big move","accepted, held for review",hold,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → hold,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 No risk gate,1 normal,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,31.6 / 31.7 / 36.6
-No risk gate,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+No risk gate,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,15,35.9,31.6 / 31.7 / 36.6
 No risk gate,3 wrong reading,accepted,publish,1,coordinator → quant → research → synthesis → critic → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,28,21,61.7,31.6 / 31.7 / 36.6
 No risk gate,4 missing filing,accepted,publish,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,23,17,50.5,31.6 / 31.7 / 36.6
 No risk gate,5 retries used up,baseline,publish,2,coordinator → quant → research → synthesis → critic → synthesis → critic → synthesis → critic → fallback → risk_gate → publish,2/4,False,0,False,40,28,87.8,32.1 / 35.7 / 32.1
@@ -90,7 +90,7 @@ No risk gate,7 hidden instructions,accepted,publish,0,coordinator → quant → 
 No risk gate,8 late data,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,10,11,22.7,31.6 / 31.7 / 36.6
 No risk gate,"9 rare event, big move",accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,4/4,False,0,False,16,14,35.6,30.6 / 23.7 / 45.6
 No forecast-date rule,1 normal,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,True,30,24,66.6,31.6 / 31.7 / 36.6
-No forecast-date rule,2 empty search,accepted,publish,0,coordinator → quant → research → synthesis → critic → finalise → risk_gate → publish,3/4,False,0,False,13,12,29.0,33.6 / 32.7 / 33.6
+No forecast-date rule,2 empty search,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,3/4,False,0,True,30,24,66.6,33.6 / 32.7 / 33.6
 No forecast-date rule,3 wrong reading,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,True,30,24,66.6,31.6 / 31.7 / 36.6
 No forecast-date rule,4 missing filing,accepted,flag,1,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → finalise → risk_gate → flag,4/4,False,0,True,27,21,59.7,31.6 / 31.7 / 36.6
 No forecast-date rule,5 retries used up,baseline,flag,2,coordinator → quant → research → synthesis → critic → research_more → synthesis → critic → synthesis → critic → fallback → risk_gate → flag,2/4,False,0,True,40,28,87.8,32.1 / 35.7 / 32.1
