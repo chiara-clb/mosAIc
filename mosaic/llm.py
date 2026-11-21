@@ -161,21 +161,29 @@ def scripted_chat(script: dict | None = None) -> Chat:
 NEW_CLAUDE = re.compile(r"claude-(opus|sonnet|haiku|fable|mythos)-5")
 
 
-def anthropic_chat(model: str | None = None, client=None, temperature: float | None = None) -> Chat:
+RETRY_CEILING = 20000      # the SDK asks for streaming above about 21,000 tokens
+
+
+def anthropic_chat(model: str | None = None, client=None, temperature: float | None = None,
+                   thinking: bool | None = None) -> Chat:
     """Claude through the Anthropic API. `client` can be passed in for tests.
 
-    Claude 5 models think by default, the hidden thinking counts toward max_tokens, and they refuse
-    `temperature`. Each agent step here is a short, structured answer that code then checks, so
-    thinking is turned off and no temperature is sent. If a reply still comes back empty because
-    the limit was reached, it is asked again once with four times the limit.
+    Claude 5 models refuse `temperature`, so none is sent. They think before answering (adaptive
+    thinking), and the hidden thinking counts toward max_tokens, so with thinking on every call gets
+    at least SETTINGS.llm_thinking_tokens. `thinking=False` (or MOSAIC_LLM_THINKING=off) turns it
+    off, as in the first evaluation. If a reply still comes back empty because the limit was
+    reached, it is asked again once with four times the limit (at most RETRY_CEILING).
     """
     if client is None:
         import anthropic                                   # optional dependency
         client = anthropic.Anthropic()
     model = model or SETTINGS.llm_model
+    thinking = SETTINGS.llm_thinking if thinking is None else thinking
     extra: dict = {}
+    floor = 0
     if NEW_CLAUDE.search(model):
-        extra["extra_body"] = {"thinking": {"type": "disabled"}}
+        extra["extra_body"] = {"thinking": {"type": "adaptive" if thinking else "disabled"}}
+        floor = SETTINGS.llm_thinking_tokens if thinking else 0
     else:
         extra["temperature"] = SETTINGS.llm_temperature if temperature is None else temperature
 
@@ -191,10 +199,11 @@ def anthropic_chat(model: str | None = None, client=None, temperature: float | N
     def chat(messages: list[dict], max_tokens: int = 300) -> str:
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         rest = [m for m in messages if m["role"] != "system"]
-        r = create(model=model, system=system, messages=rest, max_tokens=max_tokens)
+        limit = max(max_tokens, floor)
+        r = create(model=model, system=system, messages=rest, max_tokens=limit)
         text = "".join(getattr(b, "text", "") for b in r.content).strip()
         if getattr(r, "stop_reason", None) == "max_tokens" and parse_json(text) is None:
-            r = create(model=model, system=system, messages=rest, max_tokens=4 * max_tokens)
+            r = create(model=model, system=system, messages=rest, max_tokens=min(4 * limit, RETRY_CEILING))
             text = "".join(getattr(b, "text", "") for b in r.content).strip()
         return text
     return chat

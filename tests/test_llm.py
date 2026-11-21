@@ -82,8 +82,8 @@ def test_anthropic_backend_sends_system_separately():
     chat = anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=FakeMessages()))
     out = chat(agent_messages("critic", "Check.", {"q": 1}), 50)
     assert out == '{"ok": true}'
-    assert sent["model"] == "claude-haiku-5-5" and sent["max_tokens"] == 50
-    assert "temperature" not in sent and sent["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert sent["model"] == "claude-haiku-5-5" and sent["max_tokens"] == 8000      # room for the thinking
+    assert "temperature" not in sent and sent["extra_body"] == {"thinking": {"type": "adaptive"}}
     assert sent["system"].startswith("Agent: critic") and [m["role"] for m in sent["messages"]] == ["user"]
 
 
@@ -130,5 +130,41 @@ def test_a_reply_cut_off_by_the_limit_is_asked_again_with_more_room():
                 return SimpleNamespace(content=[SimpleNamespace(type="thinking")], stop_reason="max_tokens")
             return SimpleNamespace(content=[SimpleNamespace(text='{"readings": []}')], stop_reason="end_turn")
 
-    out = anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=Thinker()))([{"role": "user", "content": "x"}], 400)
+    out = anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=Thinker()),
+                         thinking=False)([{"role": "user", "content": "x"}], 400)
     assert out == '{"readings": []}' and limits == [400, 1600]
+
+
+def test_with_thinking_the_retry_stays_under_the_streaming_limit():
+    limits = []
+
+    class Thinker:
+        def create(self, **kw):
+            limits.append(kw["max_tokens"])
+            if len(limits) == 1:
+                return SimpleNamespace(content=[SimpleNamespace(type="thinking")], stop_reason="max_tokens")
+            return SimpleNamespace(content=[SimpleNamespace(text='{"readings": []}')], stop_reason="end_turn")
+
+    anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=Thinker()))([{"role": "user", "content": "x"}], 400)
+    assert limits == [8000, 20000]
+
+
+def test_thinking_can_be_turned_off_as_in_the_first_evaluation():
+    sent = {}
+
+    class FakeMessages:
+        def create(self, **kw):
+            sent.update(kw)
+            return SimpleNamespace(content=[SimpleNamespace(text="{}")])
+
+    anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=FakeMessages()),
+                   thinking=False)([{"role": "user", "content": "x"}], 300)
+    assert sent["extra_body"] == {"thinking": {"type": "disabled"}} and sent["max_tokens"] == 300
+
+
+def test_the_thinking_setting_reads_the_environment(monkeypatch):
+    from mosaic.config import Settings
+    monkeypatch.setenv("MOSAIC_LLM_THINKING", "off")
+    assert Settings().llm_thinking is False
+    monkeypatch.setenv("MOSAIC_LLM_THINKING", "on")
+    assert Settings().llm_thinking is True

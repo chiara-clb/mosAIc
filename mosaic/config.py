@@ -116,6 +116,10 @@ class Settings:
     llm_provider: str = field(default_factory=lambda: os.environ.get("MOSAIC_LLM_PROVIDER", "anthropic"))
     llm_model: str = field(default_factory=lambda: os.environ.get("MOSAIC_LLM_MODEL", "claude-sonnet-5-5"))
     llm_temperature: float = 0.0
+    # Claude 5 models think before answering; thinking counts toward each call's token limit,
+    # so a call with thinking gets at least llm_thinking_tokens. MOSAIC_LLM_THINKING=off turns it off.
+    llm_thinking: bool = field(default_factory=lambda: os.environ.get("MOSAIC_LLM_THINKING", "on").lower() != "off")
+    llm_thinking_tokens: int = 8000
     run_model_budget: int = 40        # model calls for a whole forecast, retries included
     seed: int = 0
 
