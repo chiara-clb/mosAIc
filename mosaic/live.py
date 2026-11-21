@@ -45,16 +45,23 @@ def _hits(results: list[dict]) -> list[dict]:
 
 
 def live_world(ticker: str, as_of: datetime, *, sec_get=None, gdelt: Gdelt | None = None, embed=None,
-               price_fetch=None, cache_dir=None, history_days: int = 200, price_years: int = 6) -> LiveWorld:
+               price_fetch=None, cache_dir=None, history_days: int = 200, price_years: int = 6,
+               progress=None) -> LiveWorld:
+    """Build the world for a real stock. `progress(message)` is called at each stage, for a live display."""
+    say = progress or (lambda message: None)
     get = sec_get or sec_getter()
     embed = embed or sentence_transformer_embed()
     gdelt = gdelt or Gdelt()
+    say("Listing SEC filings")
     cik = ticker_to_cik(get)[ticker]
     company, rows = list_filings(cik, get)
+    say(f"Reading {company}'s filings from the last {history_days} days")
 
     # Documents from the last 200 days (enough for the previous 10-Q or 10-K, for novelty)
     corpus = build_corpus(ticker, company, cik, rows, as_of - timedelta(days=history_days), as_of, get)
+    say(f"Indexing {len(corpus)} passages for search")
     index = Index(corpus, embed)
+    say("Loading prices")
 
     # Prices and case memory (this stock's own past events)
     start, end = (as_of - timedelta(days=365 * price_years)).date().isoformat(), as_of.date().isoformat()
@@ -72,7 +79,8 @@ def live_world(ticker: str, as_of: datetime, *, sec_get=None, gdelt: Gdelt | Non
         return rx["bucket"] if rx else None
 
     # News stories, with their price reaction
-    news = news_items(company, ticker, as_of, gdelt, embed)
+    news = news_items(company, ticker, as_of, gdelt, embed, say)
+    say(f"News: {len(news)} stories found")
     for n in news:
         n["reaction"] = reaction(n["first_seen"])
 

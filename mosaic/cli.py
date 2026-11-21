@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mosaic.graph import graph_engine, run_forecast
+from mosaic.views import progress_line
 from mosaic.llm import make_model
 from mosaic.report import render_markdown
 from mosaic.request import check_request
@@ -74,14 +75,15 @@ def main(argv=None) -> int:
         return 2
     from mosaic.live import live_world
     try:
-        world = live_world(args.ticker.upper(), as_of)
+        world = live_world(args.ticker.upper(), as_of, progress=print)
     except ValueError as exc:                              # e.g. no SEC contact set
         print(f"Cannot load live data: {exc}")
         return 3
     except ImportError as exc:
         print(f"Live data needs extra packages ({exc.name}): pip install -e '.[retrieval,prices]'")
         return 3
-    state, run = run_forecast(world, make_model(args.backend, model_name=args.model))
+    state, run = run_forecast(world, make_model(args.backend, model_name=args.model),
+                              on_event=lambda e: (line := progress_line(e)) and print(line))
     print(f"{state['final']['status']}, review: {state['final'].get('review')} -> {save(state, run, out)}")
     return 0
 

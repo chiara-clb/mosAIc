@@ -110,3 +110,13 @@ def test_a_full_forecast_runs_on_the_live_world_without_leakage(tmp_path):
     state, run = run_forecast(build(tmp_path), make_model("scripted"), engine=ENGINE)
     assert state["final"]["status"] in ("accepted", "baseline") and state["evidence"]
     assert leakage_audit(run.tools.trace) == []
+
+
+def test_live_world_reports_each_stage(tmp_path):
+    said = []
+    live_world("ACME", AS_OF, sec_get=sec_get, gdelt=gdelt(tmp_path), embed=embed,
+               price_fetch=price_fetch, cache_dir=tmp_path / "px", progress=said.append)
+    assert said[0] == "Listing SEC filings"
+    assert any(s.startswith("Indexing") for s in said)
+    assert sum(s.startswith("News: ") and "days)" in s for s in said) == 14
+    assert said[-1].startswith("News: ") and said[-1].endswith("stories found")

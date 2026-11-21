@@ -18,7 +18,8 @@ from mosaic.llm import make_model
 from mosaic.request import check_request
 from mosaic.risk import ReviewLog, apply_review
 from mosaic.scenarios import SCENARIOS, run_scenario
-from mosaic.views import evidence_rows, forecast_rows, ledger_rows, run_facts, step_rows, tool_rows, tot_rows
+from mosaic.views import (evidence_rows, forecast_rows, ledger_rows, progress_line, run_facts, step_rows, tool_rows,
+                          tot_rows)
 
 st.set_page_config(page_title="MosAIc", layout="wide")
 st.title("MosAIc")
@@ -47,22 +48,37 @@ with st.sidebar:
     st.caption(f"Graph engine: {graph_engine()[3]}")
 
 if go:
-    with st.spinner("The agents are working..."):
+    with st.status("The agents are working…", expanded=True) as status:
+        shown = st.empty()
+        lines: list[str] = []
+
+        def show(line: str | None) -> None:
+            if line:
+                lines.append(line)
+                shown.code("\n".join(lines[-25:]), language=None)      # the latest 25 lines, live
+
+        on_event = lambda event: show(progress_line(event))
         try:
             if mode.startswith("Demo"):
                 factory = None if backend == "scripted" else (lambda script: make_model(backend, model_name=model_name))
-                state, run, _ = run_scenario(scenario, model_factory=factory)
+                state, run, _ = run_scenario(scenario, model_factory=factory, on_event=on_event)
             else:
                 when = datetime(as_of.year, as_of.month, as_of.day, tzinfo=timezone.utc)
                 reasons = check_request(ticker, when)
                 if reasons:
+                    status.update(label="Request refused", state="error")
                     st.error("Request refused: " + "; ".join(reasons))
                     st.stop()
                 from mosaic.live import live_world
-                state, run = run_forecast(live_world(ticker, when), make_model(backend, model_name=model_name))
+                show("Loading the data (saved data is reused, new data is downloaded)")
+                world = live_world(ticker, when, progress=show)
+                state, run = run_forecast(world, make_model(backend, model_name=model_name), on_event=on_event)
         except Exception as exc:                                    # show the reason instead of a stack trace
+            status.update(label="The run failed", state="error")
             st.error(f"The run failed: {exc}")
             st.stop()
+        status.update(label=f"Done: {state['final']['status']}, {state['final'].get('review', '')}",
+                      state="complete", expanded=False)
     st.session_state.update(state=state, run=run, reviewed=None)
 
 if "state" not in st.session_state:

@@ -169,7 +169,7 @@ class Gdelt:
         print(f"Warning: GDELT news could not be fetched ({error}). The forecast will have no news.", file=sys.stderr)
         return {}
 
-    def fetch(self, company: str, ticker: str, as_of: datetime) -> tuple[dict, dict]:
+    def fetch(self, company: str, ticker: str, as_of: datetime, progress=None) -> tuple[dict, dict]:
         """Headlines from the `news_days` days before as_of, asked for one day at a time.
 
         GDELT returns at most 250 articles per call, newest first. For a widely covered company one
@@ -178,7 +178,10 @@ class Gdelt:
         """
         q, fmt = news_query(company, ticker), "%Y%m%d%H%M%S"
         articles, seen_urls = [], set()
-        for start, end in news_days(as_of):
+        days = news_days(as_of)
+        for n, (start, end) in enumerate(days, 1):
+            if progress:
+                progress(f"News: {start:%d %b} ({n} of {len(days)} days)")
             day = self({"query": q, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
                         "startdatetime": start.strftime(fmt), "enddatetime": end.strftime(fmt)})
             for a in (day or {}).get("articles", []):
@@ -203,8 +206,8 @@ def news_days(as_of: datetime) -> list[tuple[datetime, datetime]]:
     return days
 
 
-def news_items(company: str, ticker: str, as_of: datetime, gdelt: Gdelt, embed) -> list[dict]:
+def news_items(company: str, ticker: str, as_of: datetime, gdelt: Gdelt, embed, progress=None) -> list[dict]:
     """The news stories for one forecast, ready to put in the world."""
-    arts, tone = gdelt.fetch(company, ticker, as_of)
+    arts, tone = gdelt.fetch(company, ticker, as_of, progress)
     return stories_to_items(build_stories(parse_articles(arts, as_of, company, ticker), embed), ticker,
                             tone_shift(tone, as_of))
