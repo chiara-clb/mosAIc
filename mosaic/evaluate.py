@@ -371,6 +371,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--resume", action="store_true", help="keep the rows already written and skip them")
     p.add_argument("--limit", type=int, default=None, help="run at most this many stock-dates")
     p.add_argument("--out", default=str(OUT_DIR))
+    p.add_argument("--options-dir", default=None,
+                   help="folder with FirstRate option files; adds the option-implied answer key to the scores")
     return p.parse_args(argv)
 
 
@@ -391,7 +393,15 @@ def main(argv=None) -> int:
         return 2
     chat, name = make_chat(a.backend, a.model)
     print(f"{len(tickers)} stocks x {len(dates)} dates ({dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}), model {name}.")
-    table = run(tickers, dates, chat, name, Path(a.out), variants=variants, memory=a.memory, resume=a.resume, limit=a.limit)
+    answer_key, unscorable = None, []
+    if a.options_dir:
+        from .firstrate import make_answer_key       # evaluation only, never seen by the agents
+        answer_key = make_answer_key(a.options_dir, default_price_source, unscorable_log=unscorable)
+    table = run(tickers, dates, chat, name, Path(a.out), variants=variants, memory=a.memory, resume=a.resume,
+                limit=a.limit, answer_key=answer_key)
+    if unscorable:
+        pd.DataFrame(unscorable).to_csv(Path(a.out) / "unscorable.csv", index=False)
+        print(f"{len(unscorable)} stock-dates had no usable option prices (see unscorable.csv).")
     if table["outcome"].isin(OUTCOMES).any():
         print(summary_table(table).to_string(index=False))
     print(f"Results in {a.out}/ (forecasts.csv, summary.csv, calibration.csv, summary.md)")

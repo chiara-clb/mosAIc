@@ -172,3 +172,19 @@ def test_cli_checks_its_arguments(capsys):
     assert E.main(["--backend", "scripted", "--start", "2030-01-01", "--end", "2030-02-01"]) == 2   # no date has passed
     args = E.parse_args(["--tickers", "all"])
     assert args.tickers == "all"
+
+
+def test_options_dir_adds_the_answer_key(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_run(*args, answer_key=None, **kw):
+        seen["key"] = answer_key
+        return pd.DataFrame({"outcome": []})
+
+    monkeypatch.setattr(E, "run", fake_run)
+    args = ["--backend", "scripted", "--tickers", "AAPL", "--start", "2026-07-01", "--end", "2026-07-10",
+            "--out", str(tmp_path)]
+    assert E.main(args) == 0
+    assert seen["key"] is None
+    assert E.main(args + ["--options-dir", str(tmp_path)]) == 0
+    assert callable(seen["key"])
