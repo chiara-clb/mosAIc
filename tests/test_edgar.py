@@ -86,3 +86,34 @@ def test_sec_getter_needs_a_contact():
     import pytest
     with pytest.raises(ValueError):
         edgar.sec_getter(user_agent="")
+
+
+def test_sec_pages_are_saved_and_read_back(tmp_path):
+    import os
+    import time as _time
+    from mosaic.edgar import cached_getter
+
+    calls = []
+
+    class Page:
+        def __init__(self, text):
+            self.text = text
+
+    def get(url):
+        calls.append(url)
+        return Page('{"n": %d}' % len(calls))
+
+    g = cached_getter(get, tmp_path, max_age_days=7)
+    doc = "https://www.sec.gov/Archives/edgar/data/320193/x/index.json"
+    lst = "https://data.sec.gov/submissions/CIK0000320193.json"
+    assert g(doc).json() == {"n": 1}
+    assert g(doc).json() == {"n": 1}                 # second time from disk
+    assert g(lst).json() == {"n": 2}
+    assert g(lst).text == '{"n": 2}'
+    assert len(calls) == 2
+
+    old = _time.time() - 8 * 86400                    # a week later
+    for f in tmp_path.iterdir():
+        os.utime(f, (old, old))
+    assert g(doc).json() == {"n": 1}                 # filed documents never change
+    assert g(lst).json() == {"n": 3}                 # the list of filings is fetched again

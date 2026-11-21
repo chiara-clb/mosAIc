@@ -9,8 +9,11 @@ Network access goes through one `get(url)` function, so everything can be tested
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -23,8 +26,44 @@ ANSWER_KEY_LEAK = re.compile(r"implied vol|implied move|options? (traders|market
 ITEM_RE = re.compile(r"\n\s*(item\s+\d+[a-z]?\.?)\s*([^\n]{0,80})", re.I)
 
 
-def sec_getter(user_agent: str | None = None, pause: float = 0.15) -> Callable[[str], object]:
-    """A polite SEC client (well under 10 requests a second). The SEC asks for a contact in the User-Agent."""
+class SavedPage:
+    """A page read back from the disk cache, with the two things the code uses from a response."""
+
+    def __init__(self, text: str):
+        self.text = text
+
+    def json(self):
+        return json.loads(self.text)
+
+
+def cached_getter(get: Callable[[str], object], cache_dir: str | Path | None = None,
+                  max_age_days: float = 7.0) -> Callable[[str], object]:
+    """Wrap `get` so every page is saved under data/sec and read from there next time.
+
+    Filed documents (URLs under /Archives/) never change, so they are kept for good. Lists of
+    filings and the ticker table do change, so they are fetched again after `max_age_days`.
+    """
+    root = Path(cache_dir or Path(SETTINGS.data_dir) / "sec")
+
+    def cached(url: str):
+        path = root / (hashlib.sha1(url.encode()).hexdigest() + ".txt")
+        if path.exists():
+            age_days = (time.time() - path.stat().st_mtime) / 86400
+            if "/Archives/" in url or age_days < max_age_days:
+                return SavedPage(path.read_text(encoding="utf-8"))
+        r = get(url)
+        root.mkdir(parents=True, exist_ok=True)
+        path.write_text(r.text, encoding="utf-8")
+        return SavedPage(r.text)
+    return cached
+
+
+def sec_getter(user_agent: str | None = None, pause: float = 0.15, cache_dir: str | Path | None = None,
+               use_cache: bool = True) -> Callable[[str], object]:
+    """A polite SEC client (well under 10 requests a second), with pages saved on disk.
+
+    The SEC asks for a contact in the User-Agent.
+    """
     import requests
 
     ua = user_agent or SETTINGS.sec_user_agent
@@ -37,7 +76,7 @@ def sec_getter(user_agent: str | None = None, pause: float = 0.15) -> Callable[[
         r = requests.get(url, headers=headers, timeout=30)
         r.raise_for_status()
         return r
-    return get
+    return cached_getter(get, cache_dir) if use_cache else get
 
 
 # --- listing filings ---------------------------------------------------------------------------
