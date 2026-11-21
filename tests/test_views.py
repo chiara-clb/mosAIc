@@ -62,3 +62,18 @@ def test_refused_tool_calls_are_marked():
     line = progress_line({"node": "synthesis", "kind": "tool_call", "tool": "search_news", "args": {"query": "x"},
                           "status": "refused: not in role"})
     assert line == "   Synthesis agent (Tree of Thought) → search_news(query=x)  (refused: not in role)"
+
+
+def test_the_text_log_has_everything_including_raw_model_replies():
+    from mosaic.graph import run_forecast
+    from mosaic.llm import make_model
+    from mosaic.views import text_log
+    from mosaic.world import make_demo_world
+
+    state, run = run_forecast(make_demo_world(), make_model("scripted"))
+    log = text_log(state, run)
+    for heading in ("FORECAST", "LEDGER", "EVIDENCE", "TREE OF THOUGHT", "EVENTS"):
+        assert f"\n{heading}\n" in log
+    assert "Synthesis agent (Tree of Thought) model reply (limit 400 tokens):" in log
+    assert '"readings"' in log                                     # the raw JSON the model sent
+    assert log.count("model reply") == run.model.calls

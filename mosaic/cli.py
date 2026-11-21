@@ -6,7 +6,7 @@
     python -m mosaic.cli --demo --backend crewai      the same, with the agents run by CrewAI (pip install -e '.[crew]')
     python -m mosaic.cli AAPL --as-of 2026-07-15      a real stock (live data; set MOSAIC_SEC_USER_AGENT)
 
-Each forecast writes report.md, state.json and trace.jsonl under runs/<ticker>-<date>/.
+Each forecast writes report.md, state.json, trace.jsonl and log.txt (the whole run as plain text) under runs/<ticker>-<date>/.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mosaic.graph import graph_engine, run_forecast
-from mosaic.views import progress_line
+from mosaic.views import progress_line, text_log
 from mosaic.llm import make_model
 from mosaic.report import render_markdown
 from mosaic.request import check_request
@@ -33,6 +33,7 @@ def save(state: dict, run, out_dir: Path) -> Path:
     keep["tot"] = {k: v for k, v in (state.get("tot") or {}).items() if k != "prepared"}
     (folder / "state.json").write_text(json.dumps(keep, indent=2, default=str), encoding="utf-8")
     run.tools.trace.write_jsonl(folder / "trace.jsonl")
+    (folder / "log.txt").write_text(text_log(state, run), encoding="utf-8")
     return folder
 
 

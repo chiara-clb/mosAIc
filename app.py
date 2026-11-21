@@ -18,8 +18,8 @@ from mosaic.llm import make_model
 from mosaic.request import check_request
 from mosaic.risk import ReviewLog, apply_review
 from mosaic.scenarios import SCENARIOS, run_scenario
-from mosaic.views import (evidence_rows, forecast_rows, ledger_rows, progress_line, run_facts, step_rows, tool_rows,
-                          tot_rows)
+from mosaic.views import (evidence_rows, forecast_rows, ledger_rows, progress_line, run_facts, step_rows, text_log,
+                          tool_rows, tot_rows)
 
 st.set_page_config(page_title="MosAIc", layout="wide")
 st.title("MosAIc")
@@ -129,7 +129,7 @@ if state["final"]["ledger"]:
             st.caption(f"Analyst decisions so far, by event type: {st.session_state['review_log'].summary()}")
 
 # --- how the agents got there ------------------------------------------------------------------
-tabs = st.tabs(["Evidence", "Tree of Thought", "Steps", "Tool calls"])
+tabs = st.tabs(["Evidence", "Tree of Thought", "Steps", "Tool calls", "Full log"])
 with tabs[0]:
     st.dataframe(pd.DataFrame(evidence_rows(state)), use_container_width=True, hide_index=True)
 with tabs[1]:
@@ -139,6 +139,12 @@ with tabs[2]:
     st.dataframe(pd.DataFrame(step_rows(state)), use_container_width=True, hide_index=True)
 with tabs[3]:
     st.dataframe(pd.DataFrame(tool_rows(run)), use_container_width=True, hide_index=True)
+with tabs[4]:
+    log = text_log(state, run)
+    st.caption("Everything about this run as plain text, including the model's raw replies. "
+               "Use the copy icon at the top right of the box, or download it.")
+    st.download_button("Download log", log, file_name=f"{run.tools.trace.run_id}.log.txt")
+    st.code(log, language=None)
 
 st.caption(f"Model: {facts['model']}, {facts['model_calls']} calls · Tool calls: {facts['tool_calls']} · "
            f"Retries: {facts['retries']} · Leakage audit: {facts['leakage']}")

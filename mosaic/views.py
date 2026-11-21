@@ -98,3 +98,37 @@ def progress_line(event: dict) -> str | None:
             return f"✓ {who}{note}"
         return f"✓ {who} done{calls}{note}"
     return None
+
+
+def _table(rows: list[dict]) -> list[str]:
+    if not rows:
+        return ["  (none)"]
+    return ["  " + " | ".join(f"{k}: {v}" for k, v in r.items()) for r in rows]
+
+
+def text_log(state: dict, run) -> str:
+    """The whole run as plain text, to copy and paste: result, ledger, evidence, Tree of Thought, every event."""
+    req, final, facts = state["request"], state["final"], run_facts(state, run)
+    out = [f"MosAIc run {run.tools.trace.run_id}: {req['company']} ({req['ticker']}) as of {req['as_of']:%Y-%m-%d}",
+           f"Model: {facts['model']}, {facts['model_calls']} calls | tool calls: {facts['tool_calls']} | "
+           f"retries: {facts['retries']} | leakage audit: {facts['leakage']}",
+           f"Status: {final['status']} | risk gate: {facts['review']}" +
+           (f" ({'; '.join(facts['triggers'])})" if facts["triggers"] else ""),
+           "", "FORECAST"] + _table(forecast_rows(final))
+    out += ["", "LEDGER"] + _table(ledger_rows(state, final))
+    out += ["", "EVIDENCE"] + _table(evidence_rows(state))
+    out += ["", "TREE OF THOUGHT"] + _table(tot_rows(state))
+    out += ["", "EVENTS"]
+    for e in run.tools.trace.events:
+        line = progress_line(e)
+        if line:
+            out.append(line)
+        if e["kind"] == "model_call":
+            mark = "" if e.get("parsed") else "  ** reply was not valid JSON **"
+            out.append(f"   {STEP_NAMES.get(e['node'], e['node'])} model reply (limit {e.get('max_tokens')} tokens){mark}:")
+            out += ["      " + l for l in str(e.get("reply", "")).splitlines() or [""]]
+        elif e["kind"] == "source_used":
+            out.append(f"   {STEP_NAMES.get(e['node'], e['node'])} used {e.get('source')} (published {e.get('published')})")
+    if state.get("error"):
+        out += ["", "ERRORS"] + ["  " + str(x) for x in state["error"]]
+    return "\n".join(out) + "\n"
