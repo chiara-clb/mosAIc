@@ -153,6 +153,42 @@ def rows(rd: ResultsDay) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------- which releases can be chosen
+
+def after_close_releases(releases: list[datetime], since: date | None = None) -> list[datetime]:
+    """The results releases made after the 16:00 New York close, newest first (optionally from `since`)."""
+    out = [r for r in releases if r.astimezone(NEW_YORK).time() >= CLOSE]
+    if since:
+        out = [r for r in out if r.astimezone(NEW_YORK).date() >= since]
+    return sorted(out, reverse=True)
+
+
+def release_choices(releases: list[datetime], option_quarters: set[tuple[int, int]] | None = None,
+                    since: date | None = None) -> list[dict]:
+    """One entry per after-close release, for a picker: its day, time, and whether option prices cover it."""
+    out = []
+    for r in after_close_releases(releases, since):
+        local = r.astimezone(NEW_YORK)
+        d = local.date()
+        has_options = option_quarters is not None and (d.year, (d.month - 1) // 3 + 1) in option_quarters
+        label = f"{d} · {local:%H:%M} New York" + (" · options available" if has_options else "")
+        out.append({"day": d, "release": r, "options": has_options, "label": label})
+    return out
+
+
+def live_release_choices(ticker: str, options_dir: str | None = None, get=None) -> list[dict]:   # pragma: no cover
+    """The after-close results releases of a stock since 2023, from its SEC filings."""
+    from mosaic.baseline import results_dates
+    from mosaic.edgar import list_filings, sec_getter, ticker_to_cik
+    get = get or sec_getter()
+    _, filings = list_filings(ticker_to_cik(get)[ticker.upper()], get)
+    quarters = None
+    if options_dir:
+        from mosaic.firstrate import find_files
+        quarters = set(find_files(options_dir, ticker))
+    return release_choices(results_dates(filings), quarters, since=date(2023, 1, 1))
+
+
 # ---------------------------------------------------------------- live data
 
 def load_live(ticker: str, release_day: date, options_dir: str | None = None, sec_get=None,

@@ -114,3 +114,13 @@ def test_rows_show_the_chance_each_baseline_gave_to_what_happened():
     table = rows(rd)
     assert [r["Baseline"][:2] for r in table] == ["B1", "B2", "B3"]
     assert table[1]["Chance given to what happened %"] == rd.baselines["B2"][rd.actual["outcome"]]
+
+
+def test_only_after_close_releases_can_be_chosen_newest_first():
+    from mosaic.results_day import release_choices
+    releases = [after_close(date(2026, 4, 29)), datetime(2026, 7, 30, 12, 0, tzinfo=UTC),    # 08:00 New York
+                after_close(date(2026, 7, 30)), after_close(date(2022, 7, 28))]
+    choices = release_choices(releases, option_quarters={(2026, 3)}, since=date(2023, 1, 1))
+    assert [c["day"] for c in choices] == [date(2026, 7, 30), date(2026, 4, 29)]
+    assert choices[0]["options"] and not choices[1]["options"]
+    assert choices[0]["label"] == "2026-07-30 · 17:30 New York · options available"
