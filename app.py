@@ -26,6 +26,14 @@ st.title("MosAIc")
 st.caption("Probability of a large fall, a flat month or a large gain over the next 21 trading days, "
            "with a cited ledger of every adjustment.")
 
+def plain_table(rows: list[dict]) -> None:
+    """A static table: shows long text in full and never takes over the mouse wheel, so the page scrolls."""
+    if rows:
+        st.table(pd.DataFrame(rows).set_index(list(rows[0])[0]))
+    else:
+        st.write("(none)")
+
+
 def outcome_chart(table: pd.DataFrame):
     """Baseline and forecast side by side for each outcome, in the order fall, flat, gain."""
     import altair as alt
@@ -123,7 +131,7 @@ elif facts["review"] == "hold":
 
 left, right = st.columns([3, 2])
 table = pd.DataFrame(forecast_rows(final)).set_index("Outcome")
-left.dataframe(table, use_container_width=True)
+left.table(table)
 try:
     right.altair_chart(outcome_chart(table), use_container_width=True)
 except Exception:                                              # an older Altair: plain side-by-side bars
@@ -139,14 +147,14 @@ else:
 # --- how the agents got there ------------------------------------------------------------------
 tabs = st.tabs(["Evidence", "Tree of Thought", "Steps", "Tool calls", "Full log"])
 with tabs[0]:
-    st.dataframe(pd.DataFrame(evidence_rows(state)), use_container_width=True, hide_index=True)
+    plain_table(evidence_rows(state))
 with tabs[1]:
     st.caption("Every reading considered for each item. Quote check by the critic's model; score = base rate and novelty.")
-    st.dataframe(pd.DataFrame(tot_rows(state)), use_container_width=True, hide_index=True)
+    plain_table(tot_rows(state))
 with tabs[2]:
-    st.dataframe(pd.DataFrame(step_rows(state)), use_container_width=True, hide_index=True)
+    plain_table(step_rows(state))
 with tabs[3]:
-    st.dataframe(pd.DataFrame(tool_rows(run)), use_container_width=True, hide_index=True)
+    plain_table(tool_rows(run))
 with tabs[4]:
     log = text_log(state, run, final)
     st.caption("Everything about this run as plain text, including the model's raw replies. "
