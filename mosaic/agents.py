@@ -36,6 +36,7 @@ class Run:
         return parsed
 
 
+RESULTS_LATE_DAYS = 14       # results this many days past the estimate still count as due
 AMBIGUITY_GAP = 0.05          # best two ledgers point opposite ways and score this close
 
 
@@ -45,7 +46,9 @@ def coordinator(state: dict, run: Run) -> dict:
     e = run.tools.call("market_data", "coordinator", kind="earnings")
     as_of = state["request"]["as_of"]
     window_end = as_of + timedelta(days=round(SETTINGS.horizon_days * 7 / 5))
-    due = bool(e["next_estimate"] and as_of <= e["next_estimate"] <= window_end)
+    # The next date is only an estimate (last results + 91 days). If it falls up to RESULTS_LATE_DAYS before
+    # the forecast date and no newer results have appeared, the results are late, so still due.
+    due = bool(e["next_estimate"] and as_of - timedelta(days=RESULTS_LATE_DAYS) <= e["next_estimate"] <= window_end)
     return {"plan": {"results_in_window": due, "next_results_estimate": e["next_estimate"]},
             "retries": 0, "feedback": [], "hints": [],
             "_note": f"results {'due' if due else 'not due'} within the month"}

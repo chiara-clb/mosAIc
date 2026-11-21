@@ -60,6 +60,16 @@ def test_coordinator_uses_only_the_estimated_next_results_date():
     assert s["plan"]["results_in_window"] is False and s["retries"] == 0
 
 
+def test_results_a_little_later_than_estimated_still_count_as_due():
+    from datetime import timedelta
+    s, run, _ = start()
+    as_of = s["request"]["as_of"]
+    for days_late, due in ((1, True), (13, True), (20, False)):
+        run.tools.world.earnings_dates = [as_of - timedelta(days=91 + days_late)]     # estimate falls before as_of
+        through(s, run, "coordinator")
+        assert s["plan"]["results_in_window"] is due, days_late
+
+
 def test_quant_baseline_is_symmetric_and_widens_with_results():
     s, run, _ = start()
     through(s, run, "coordinator", "quant")
