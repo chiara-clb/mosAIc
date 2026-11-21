@@ -174,7 +174,11 @@ if mode.startswith("Results"):
     st.caption("An agent reads the press release (Exhibit 99.1 of the results 8-K) next to the baselines and the "
                "analysts' consensus, and writes a ledger with exact quotes. Code checks every quote and sends the "
                "ledger back once if one fails; the ledger then adjusts B3. The agent has no tools.")
-    if st.button("Read the release with Claude", disabled=rd.baselines.get("B3") is None):
+    if rd.baselines.get("B3") is None:
+        why = next((n.removeprefix("options: ") for n in rd.notes if n.startswith("options:")), "no option prices")
+        st.warning(f"The release reader adjusts B3, the options baseline, which could not be computed for this "
+                   f"release ({why}). Choose a release marked “options available”, or check the option files.")
+    elif st.button("Read the release with Claude"):
         from mosaic.llm import make_model
         from mosaic.release_reader import fetch_release, load_consensus, read_release
         with st.spinner("Fetching the press release and reading it…"):
