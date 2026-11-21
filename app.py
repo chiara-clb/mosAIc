@@ -26,6 +26,20 @@ st.title("MosAIc")
 st.caption("Probability of a large fall, a flat month or a large gain over the next 21 trading days, "
            "with a cited ledger of every adjustment.")
 
+def outcome_chart(table: pd.DataFrame):
+    """Baseline and forecast side by side for each outcome, in the order fall, flat, gain."""
+    import altair as alt
+    long = table[["Baseline %", "Forecast %"]].reset_index().melt("Outcome", var_name="Series", value_name="Percent")
+    order = list(table.index)
+    return (alt.Chart(long).mark_bar()
+            .encode(x=alt.X("Outcome:N", sort=order, title=None, axis=alt.Axis(labelAngle=0)),
+                    xOffset=alt.XOffset("Series:N", sort=["Baseline %", "Forecast %"]),
+                    y=alt.Y("Percent:Q", title="%"),
+                    color=alt.Color("Series:N", sort=["Baseline %", "Forecast %"], legend=alt.Legend(orient="bottom", title=None)),
+                    tooltip=["Outcome", "Series", alt.Tooltip("Percent:Q", format=".1f")])
+            .properties(height=260))
+
+
 # --- what to run --------------------------------------------------------------------------------
 with st.sidebar:
     st.header("Forecast")
@@ -98,35 +112,23 @@ for t in facts["triggers"]:
     st.markdown(f"- {t}")
 for w in facts["why"]:
     st.warning("Baseline reported: " + w)
+if facts["review"] == "hold" and not st.session_state.get("reviewed"):
+    st.info("Held for the analyst: review each ledger line in **Analyst review** at the bottom of the page.")
 
 left, right = st.columns([3, 2])
 table = pd.DataFrame(forecast_rows(final)).set_index("Outcome")
 left.dataframe(table, use_container_width=True)
-right.bar_chart(table[["Baseline %", "Forecast %"]])
+try:
+    right.altair_chart(outcome_chart(table), use_container_width=True)
+except Exception:                                              # an older Altair: plain side-by-side bars
+    right.bar_chart(table[["Baseline %", "Forecast %"]], stack=False)
 
 st.markdown("#### Ledger")
 rows = ledger_rows(state, final)
 if rows:
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.table(pd.DataFrame(rows).set_index("Source"))      # a plain table wraps long quotes and reasons
 else:
     st.write("No adjustments: the forecast is the baseline.")
-
-# --- the analyst's review -----------------------------------------------------------------------
-if state["final"]["ledger"]:
-    with st.expander("Analyst review: keep, resize or strike each line",
-                     expanded=facts["review"] == "hold" and not st.session_state.get("reviewed")):
-        decisions = {}
-        for line in state["final"]["ledger"]:
-            choice = st.selectbox(f"{line['source']}: {line['effect']} {line['size']}",
-                                  ["keep", "strike", "resize to small", "resize to medium", "resize to large"],
-                                  key=f"review-{line['source']}")
-            decisions[line["source"]] = ("resize", choice.split()[-1]) if choice.startswith("resize") else choice
-        if st.button("Apply review"):
-            log = st.session_state.setdefault("review_log", ReviewLog())
-            st.session_state["reviewed"] = apply_review(state, decisions, log)
-            st.rerun()
-        if st.session_state.get("review_log"):
-            st.caption(f"Analyst decisions so far, by event type: {st.session_state['review_log'].summary()}")
 
 # --- how the agents got there ------------------------------------------------------------------
 tabs = st.tabs(["Evidence", "Tree of Thought", "Steps", "Tool calls", "Full log"])
@@ -148,3 +150,20 @@ with tabs[4]:
 
 st.caption(f"Model: {facts['model']}, {facts['model_calls']} calls · Tool calls: {facts['tool_calls']} · "
            f"Retries: {facts['retries']} · Leakage audit: {facts['leakage']}")
+
+# --- the analyst's review -----------------------------------------------------------------------
+if state["final"]["ledger"]:
+    with st.expander("Analyst review: keep, resize or strike each line",
+                     expanded=facts["review"] == "hold" and not st.session_state.get("reviewed")):
+        decisions = {}
+        for line in state["final"]["ledger"]:
+            choice = st.selectbox(f"{line['source']}: {line['effect']} {line['size']}",
+                                  ["keep", "strike", "resize to small", "resize to medium", "resize to large"],
+                                  key=f"review-{line['source']}")
+            decisions[line["source"]] = ("resize", choice.split()[-1]) if choice.startswith("resize") else choice
+        if st.button("Apply review"):
+            log = st.session_state.setdefault("review_log", ReviewLog())
+            st.session_state["reviewed"] = apply_review(state, decisions, log)
+            st.rerun()
+        if st.session_state.get("review_log"):
+            st.caption(f"Analyst decisions so far, by event type: {st.session_state['review_log'].summary()}")
