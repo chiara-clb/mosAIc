@@ -51,7 +51,10 @@ def live_world(ticker: str, as_of: datetime, *, sec_get=None, gdelt: Gdelt | Non
     say = progress or (lambda message: None)
     get = sec_get or sec_getter()
     embed = embed or sentence_transformer_embed()
-    gdelt = gdelt or Gdelt()
+    if gdelt is None:                      # saved Wayback news when it covers this stock and date, else GDELT
+        from mosaic.news_archive import ArchiveNews
+        archive = ArchiveNews()
+        gdelt = archive if archive.covers(ticker, as_of) else Gdelt()
     say("Listing SEC filings")
     cik = ticker_to_cik(get)[ticker]
     company, rows = list_filings(cik, get)
