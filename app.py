@@ -56,23 +56,71 @@ def outcome_chart(table: pd.DataFrame):
 # --- what to run --------------------------------------------------------------------------------
 with st.sidebar:
     st.header("Forecast")
-    mode = st.radio("Company", ["Demo company (synthetic)", "Real stock"])
-    backend = st.selectbox("Model", ["scripted", "anthropic", "crewai"],
-                           help="scripted: answers written in advance, no key needed. anthropic: Claude, needs "
-                                "ANTHROPIC_API_KEY. crewai: Claude through the agents' CrewAI role cards.")
-    model_name = st.text_input("Claude model", "claude-haiku-5-5") if backend in ("anthropic", "crewai") else None
-    if mode.startswith("Demo"):
-        scenario = st.selectbox("Scenario", list(SCENARIOS), help="Each scenario plants one problem for the guardrails.")
-        st.caption("Planted: " + SCENARIOS[scenario]["plant"])
+    mode = st.radio("Company", ["Demo company (synthetic)", "Real stock", "Results day (next-day move)"],
+                    help="Results day: the three baselines for the move after an after-close results release, "
+                         "a first step towards forecasting right after results.")
+    if mode.startswith("Results"):
+        rd_ticker = st.selectbox("Stock", sorted(UNIVERSE), index=sorted(UNIVERSE).index("AMZN"))
+        rd_day = st.date_input("Release day (reported after the close)", date(2026, 7, 30))
+        rd_options = st.text_input("Folder of FirstRate option files", "data/firstrate")
+        rd_go = st.button("Show the baselines", type="primary")
+        go = False
     else:
-        ticker = st.selectbox("Stock", sorted(UNIVERSE))
-        as_of = st.date_input("Forecast date (start of day)", date(2026, 7, 15))
-        if not SETTINGS.sec_user_agent:
-            st.warning("Set MOSAIC_SEC_USER_AGENT to 'Your Name your.email@example.com' before running a real stock.")
-    if backend in ("anthropic", "crewai") and not os.environ.get("ANTHROPIC_API_KEY"):
-        st.warning("ANTHROPIC_API_KEY is not set.")
-    go = st.button("Run forecast", type="primary")
+        rd_go = False
+        backend = st.selectbox("Model", ["scripted", "anthropic", "crewai"],
+                               help="scripted: answers written in advance, no key needed. anthropic: Claude, needs "
+                                    "ANTHROPIC_API_KEY. crewai: Claude through the agents' CrewAI role cards.")
+        model_name = st.text_input("Claude model", "claude-haiku-5-5") if backend in ("anthropic", "crewai") else None
+        if mode.startswith("Demo"):
+            scenario = st.selectbox("Scenario", list(SCENARIOS), help="Each scenario plants one problem for the guardrails.")
+            st.caption("Planted: " + SCENARIOS[scenario]["plant"])
+        else:
+            ticker = st.selectbox("Stock", sorted(UNIVERSE))
+            as_of = st.date_input("Forecast date (start of day)", date(2026, 7, 15))
+        if backend in ("anthropic", "crewai") and not os.environ.get("ANTHROPIC_API_KEY"):
+            st.warning("ANTHROPIC_API_KEY is not set.")
+        go = st.button("Run forecast", type="primary")
+    if not mode.startswith("Demo") and not SETTINGS.sec_user_agent:
+        st.warning("Set MOSAIC_SEC_USER_AGENT to 'Your Name your.email@example.com' before using a real stock.")
     st.caption(f"Graph engine: {graph_engine()[3]}")
+
+# --- results day: three baselines for the next-day move ---------------------------------------
+if mode.startswith("Results"):
+    from mosaic.results_day import NEW_YORK, load_live, rows as rd_rows
+    st.subheader("Results day: how much will the stock move the day after results?")
+    st.caption("For a release after the close, the move from that close to the next day's close, in three buckets. "
+               "A large move is beyond half the size of the stock's last eight results-day moves. "
+               "Three baselines, all known before the release. No model is called.")
+    if rd_go:
+        with st.spinner("Loading SEC results dates, prices and option quotes…"):
+            try:
+                st.session_state["rd"] = load_live(rd_ticker, rd_day, rd_options or None)
+            except Exception as exc:                            # show the reason instead of a stack trace
+                st.session_state["rd"] = None
+                st.error(f"Could not compute the baselines: {exc}")
+    rd = st.session_state.get("rd")
+    if rd is None:
+        st.info("Choose a stock and the day it reported after the close, for example AMZN 2026-07-30, "
+                "NVDA 2026-08-26 or GOOGL 2026-07-22, and press **Show the baselines**.")
+        st.stop()
+    st.markdown(f"**{rd.ticker}** reported at **{rd.release.astimezone(NEW_YORK):%H:%M} New York time** on "
+                f"{rd.t0}. A large move is beyond **±{rd.tau * 100:.1f}%** "
+                f"(half of {rd.J * 100:.1f}%, the typical size of its last {len(rd.past_moves)} results-day moves).")
+    table = pd.DataFrame(rd_rows(rd)).set_index("Baseline")
+    left, right = st.columns([3, 2])
+    left.table(table.map(lambda v: "–" if pd.isna(v) else f"{v:.1f}"))
+    chart = table[["Fall %", "Flat %", "Gain %"]].dropna()
+    if len(chart):
+        right.bar_chart(chart.T, stack=False)
+    if rd.actual:
+        st.success(f"What happened: **{rd.actual['move'] * 100:+.1f}%** on {rd.t1}, a **{rd.actual['outcome']}**.")
+    for n in rd.notes:
+        st.caption("Note: " + n)
+    with st.expander("The previous results-day moves behind the barrier"):
+        plain_table([{"Reaction day": d, "Move %": round(m * 100, 1)} for d, m in rd.past_moves])
+    st.caption("Next step: an agent that reads the release itself and adjusts these baselines, scored against what "
+               "happened. A prototype of it is described in the report.")
+    st.stop()
 
 if go:
     with st.status("The agents are working…", expanded=True) as status:
