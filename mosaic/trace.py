@@ -25,13 +25,26 @@ class Trace:
     run_id: str
     as_of: datetime
     events: list[dict] = field(default_factory=list)
+    listeners: list = field(default_factory=list, repr=False, compare=False)   # called with each event, live
 
     def add(self, node: str, kind: str, **fields: Any) -> dict:
         """Record one event, e.g. add("research", "tool_call", tool="search_documents", status="ok")."""
         event = {"step": len(self.events), "node": node, "kind": kind,
                  "at": datetime.now(timezone.utc).isoformat(), **fields}
         self.events.append(event)
+        self._tell(event)
         return event
+
+    def announce(self, node: str, message: str) -> None:
+        """Tell the listeners what is happening now, without adding an event to the record."""
+        self._tell({"node": node, "kind": "progress", "message": message})
+
+    def _tell(self, event: dict) -> None:
+        for listen in self.listeners:
+            try:
+                listen(event)
+            except Exception:              # a broken display must never stop a forecast
+                pass
 
     def used(self, node: str, source_id: str, published: datetime, **fields: Any) -> dict:
         """Record that a step relied on a source, with the time the source became public."""

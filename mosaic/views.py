@@ -64,3 +64,37 @@ def run_facts(state: dict, run) -> dict:
             "why": final.get("why") or [], "retries": state.get("retries", 0), "model": run.model.name,
             "model_calls": run.model.calls, "tool_calls": len(run.tools.calls),
             "leakage": "clean" if not leaks else f"{len(leaks)} sources published too late"}
+
+
+STEP_NAMES = {"coordinator": "Coordinator", "quant": "Quant agent", "research": "Research agent",
+              "join": "Waiting for quant and research", "synthesis": "Synthesis agent (Tree of Thought)",
+              "critic": "Critic", "finalise": "Finalising the forecast", "fallback": "Falling back to the baseline",
+              "risk_gate": "Risk gate", "publish": "Published", "flag": "Published with a flag",
+              "hold": "Held for the analyst"}
+
+
+def _short(value, limit: int = 60) -> str:
+    text = str(value)
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def progress_line(event: dict) -> str | None:
+    """One readable line for a live event, or None for events not worth showing."""
+    node, kind = event.get("node", ""), event.get("kind")
+    who = STEP_NAMES.get(node, node)
+    if kind == "progress":
+        if event.get("message") != "started":
+            return event.get("message")
+        return None if node in ("publish", "flag", "hold") else f"{who}: working…"
+    if kind == "tool_call":
+        args = ", ".join(f"{k}={_short(v, 40)!s}" for k, v in (event.get("args") or {}).items())
+        status = event.get("status", "")
+        mark = "" if status == "ok" else f"  ({status})"
+        return f"   {who} → {event.get('tool')}({args}){mark}"
+    if kind == "step":
+        note = f": {_short(event['note'], 90)}" if event.get("note") else ""
+        calls = f" [{event.get('model_calls', 0)} model calls]" if event.get("model_calls") else ""
+        if node in ("publish", "flag", "hold"):
+            return f"✓ {who}{note}"
+        return f"✓ {who} done{calls}{note}"
+    return None

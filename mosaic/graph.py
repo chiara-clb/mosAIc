@@ -53,6 +53,7 @@ def graph_engine():
 def as_node(name: str, fn, run: A.Run):
     """Run one agent, then add a line to the state's trace and the run trace."""
     def node(state):
+        run.tools.trace.announce(name, "started")
         m0, t0 = run.model.calls, len(run.tools.calls)
         try:
             out = dict(fn(state, run) or {})
@@ -118,9 +119,16 @@ def build_graph(run: A.Run, engine=None):
     return g.compile()
 
 
-def run_forecast(world: World, model: Model, failures=(), options: dict | None = None, engine=None):
-    """One forecast, start to finish. Returns (final state, run)."""
+def run_forecast(world: World, model: Model, failures=(), options: dict | None = None, engine=None,
+                 on_event=None):
+    """One forecast, start to finish. Returns (final state, run).
+
+    `on_event(event)` is called live with every trace event and every "agent started" notice,
+    so a screen can show where the run is.
+    """
     trace = Trace(run_id=f"{world.ticker}-{world.as_of:%Y-%m-%d}", as_of=world.as_of)
+    if on_event:
+        trace.listeners.append(on_event)
     run = A.Run(ToolBox(world, trace=trace, failures=failures), model,
                 {"protocol": "two_way", "readings": "tot", **(options or {})})
     run.tools.off = set(run.options.get("guardrails_off", ()))

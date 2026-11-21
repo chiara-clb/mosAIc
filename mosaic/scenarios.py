@@ -107,12 +107,13 @@ def check_expectations(summary: dict, expect: dict) -> list[str]:
 
 
 def run_scenario(name: str, model_factory: Callable[[dict], Model] | None = None, options: dict | None = None,
-                 engine=None):
+                 engine=None, on_event=None):
     """Run one scenario. model_factory(script) -> Model; by default the scripted model with the scenario's script."""
     sc = SCENARIOS[name]
     model = (model_factory or (lambda script: make_model("scripted", script)))(sc["script"])
     world = sc["world"]() if sc.get("world") else make_demo_world()
-    state, run = run_forecast(world, model, failures=sc.get("failures", ()), options=options, engine=engine)
+    state, run = run_forecast(world, model, failures=sc.get("failures", ()), options=options, engine=engine,
+                              on_event=on_event)
     summary = score_run(state, run)
     misses = check_expectations(summary, sc["expect"])
     return state, run, {"scenario": name, **summary, "as expected": "yes" if not misses else "; ".join(misses)}
