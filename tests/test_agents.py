@@ -244,3 +244,7 @@ def test_the_kept_passage_is_the_filings_own_subject_not_an_exhibit_list():
     items = [{"id": "A-4", "score": 0.6, "kind": "filing", "header": "8-K | Item 9.01", "extract": "Exhibits"}]
     kept = A.one_per_filing(items, tools, datetime(2026, 7, 30, tzinfo=timezone.utc))
     assert [e["id"] for e in kept] == ["A-0"] and "24.9 billion" in kept[0]["full_text"]
+
+
+def test_the_quote_check_asks_about_grounding_not_the_forecast():
+    assert "grounding only" in A.JUDGE_TASK and "Do not judge" in A.JUDGE_TASK

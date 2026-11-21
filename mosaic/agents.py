@@ -187,7 +187,9 @@ SYNTHESIS_TASK = ("Give two different readings of this evidence item for the sto
                   "\"medium\" | \"large\", \"quote\": exact words from the passage, \"reason\": one sentence, "
                   "\"confidence\": your probability from 0 to 1 that this reading is right}, ...]}. "
                   "'spread' means more likely to move a lot in either direction. If 'feedback' names this item, fix it.")
-JUDGE_TASK = "Does the passage contain the quote and support the claim? Reply {\"supported\": true | false}."
+JUDGE_TASK = ("Check grounding only. Is the quote in the passage (spacing and punctuation may differ), and are the "
+              "facts the claim states about it in the passage? Do not judge the claim's view of where the stock "
+              "will go: a forecast cannot be proven by a passage. Reply {\"supported\": true | false}.")
 NO_EFFECT = {"effect": "none", "size": None, "quote": "", "reason": "Already known or not material.", "ok": True}
 WEIGHTS = {"reading": 0.8, "consistency": 0.2}
 
