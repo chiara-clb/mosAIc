@@ -26,12 +26,16 @@ st.title("MosAIc")
 st.caption("Probability of a large fall, a flat month or a large gain over the next 21 trading days, "
            "with a cited ledger of every adjustment.")
 
-def plain_table(rows: list[dict]) -> None:
+def plain_table(rows: list[dict], empty: str = "(none)") -> None:
     """A static table: shows long text in full and never takes over the mouse wheel, so the page scrolls."""
-    if rows:
-        st.table(pd.DataFrame(rows).set_index(list(rows[0])[0]))
-    else:
-        st.write("(none)")
+    if not rows:
+        st.write(empty)
+        return
+    df = pd.DataFrame(rows).set_index(list(rows[0])[0])
+    for c in df.columns:                                       # floats as short text, not 31.0000
+        if pd.api.types.is_float_dtype(df[c]):
+            df[c] = df[c].map(lambda v: "" if pd.isna(v) else f"{v:.2f}".rstrip("0").rstrip("."))
+    st.table(df)
 
 
 def outcome_chart(table: pd.DataFrame):
@@ -113,7 +117,7 @@ facts = run_facts(state, run)
 final = st.session_state.get("reviewed") or state["final"]
 req = state["request"]
 
-# --- the forecast -------------------------------------------------------------------------------
+# --- the result: a short header, then everything in tabs -------------------------------------------
 st.subheader(f"{req['company']} ({req['ticker']}), as of {req['as_of']:%Y-%m-%d}")
 colour = {"publish": "green", "flag": "orange", "hold": "red"}.get(facts["review"], "gray")
 st.markdown(f"**Status:** {final['status']}  ·  **Risk gate:** :{colour}[{facts['review']}]")
@@ -122,53 +126,35 @@ for t in facts["triggers"]:
 for w in facts["why"]:
     st.warning("Baseline reported: " + w)
 if review_summary(final):
-    st.success(f"**{review_summary(final)}.** The forecast below is the analyst's; the agent's estimate is shown next to it.")
-    if st.button("Undo review"):
-        st.session_state["reviewed"] = None
-        st.rerun()
+    st.success(f"**{review_summary(final)}.** The forecast shown is the analyst's; the agent's estimate is next to it.")
 elif facts["review"] == "hold":
-    st.info("Held for the analyst: review each ledger line in **Analyst review** at the bottom of the page.")
-
-left, right = st.columns([3, 2])
-table = pd.DataFrame(forecast_rows(final)).set_index("Outcome")
-left.table(table)
-try:
-    right.altair_chart(outcome_chart(table), use_container_width=True)
-except Exception:                                              # an older Altair: plain side-by-side bars
-    right.bar_chart(table[[c for c in table.columns if c.endswith("%")]], stack=False)
-
-st.markdown("#### Ledger")
-rows = ledger_rows(state, final)
-if rows:
-    st.table(pd.DataFrame(rows).set_index("Source"))      # a plain table wraps long quotes and reasons
-else:
-    st.write("No adjustments: the forecast is the baseline.")
-
-# --- how the agents got there ------------------------------------------------------------------
-tabs = st.tabs(["Evidence", "Tree of Thought", "Steps", "Tool calls", "Full log"])
-with tabs[0]:
-    plain_table(evidence_rows(state))
-with tabs[1]:
-    st.caption("Every reading considered for each item. Quote check by the critic's model; score = base rate and novelty.")
-    plain_table(tot_rows(state))
-with tabs[2]:
-    plain_table(step_rows(state))
-with tabs[3]:
-    plain_table(tool_rows(run))
-with tabs[4]:
-    log = text_log(state, run, final)
-    st.caption("Everything about this run as plain text, including the model's raw replies. "
-               "Use the copy icon at the top right of the box, or download it.")
-    st.download_button("Download log", log, file_name=f"{run.tools.trace.run_id}.log.txt")
-    st.code(log, language=None)
-
+    st.info("Held for the analyst: open the **Analyst review** tab to keep, resize or strike each line.")
 st.caption(f"Model: {facts['model']}, {facts['model_calls']} calls · Tool calls: {facts['tool_calls']} · "
            f"Retries: {facts['retries']} · Leakage audit: {facts['leakage']}")
 
-# --- the analyst's review -----------------------------------------------------------------------
-if state["final"]["ledger"]:
-    with st.expander("Analyst review: keep, resize or strike each line",
-                     expanded=facts["review"] == "hold" and not st.session_state.get("reviewed")):
+names = ["Forecast and ledger", "Analyst review", "Evidence", "Tree of Thought", "Steps", "Tool calls", "Full log"]
+tabs = dict(zip(names, st.tabs(names)))
+
+with tabs["Forecast and ledger"]:
+    left, right = st.columns([3, 2])
+    table = pd.DataFrame(forecast_rows(final)).set_index("Outcome")
+    left.table(table.map(lambda v: f"{v:.1f}"))                # one decimal, as text
+    try:
+        right.altair_chart(outcome_chart(table), use_container_width=True)
+    except Exception:                                          # an older Altair: plain side-by-side bars
+        right.bar_chart(table[[c for c in table.columns if c.endswith("%")]], stack=False)
+    st.markdown("#### Ledger")
+    plain_table(ledger_rows(state, final), empty="No adjustments: the forecast is the baseline.")
+
+with tabs["Analyst review"]:
+    if not state["final"]["ledger"]:
+        st.write("Nothing to review: the forecast is the baseline.")
+    else:
+        if review_summary(final):
+            st.success(review_summary(final))
+            if st.button("Undo review"):
+                st.session_state["reviewed"] = None
+                st.rerun()
         decisions = {}
         for line in state["final"]["ledger"]:
             choice = st.selectbox(f"{line['source']}: {line['effect']} {line['size']}",
@@ -181,3 +167,19 @@ if state["final"]["ledger"]:
             st.rerun()
         if st.session_state.get("review_log"):
             st.caption(f"Analyst decisions so far, by event type: {st.session_state['review_log'].summary()}")
+
+with tabs["Evidence"]:
+    plain_table(evidence_rows(state))
+with tabs["Tree of Thought"]:
+    st.caption("Every reading considered for each item. Quote check by the critic's model; score = base rate and novelty.")
+    plain_table(tot_rows(state))
+with tabs["Steps"]:
+    plain_table(step_rows(state))
+with tabs["Tool calls"]:
+    plain_table(tool_rows(run))
+with tabs["Full log"]:
+    log = text_log(state, run, final)
+    st.caption("Everything about this run as plain text, including the model's raw replies. "
+               "Use the copy icon at the top right of the box, or download it.")
+    st.download_button("Download log", log, file_name=f"{run.tools.trace.run_id}.log.txt")
+    st.code(log, language=None)
