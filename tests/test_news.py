@@ -198,3 +198,16 @@ def test_news_items_measure_novelty_against_filings_before_the_story(tmp_path):
     g = Gdelt(tmp_path / "c.json", http_get=http, spacing=0)
     items = news_items("Intel Corporation", "INTC", AS_OF, g, embed, filings=[filing])
     assert items and items[0]["novelty"] == 0.0              # the board story was already in the 8-K
+
+
+def test_headlines_count_when_they_use_any_usual_name_of_the_company():
+    from mosaic.news import names_company, news_query
+    assert names_company("Google is making it easier to switch from iPhone", "Alphabet Inc.", "GOOGL")
+    assert names_company("Instagram adds a new feature", "Meta Platforms, Inc.", "META")
+    assert not names_company("Johnson Controls beats estimates", "Johnson & Johnson", "JNJ")      # not just "johnson"
+    assert names_company("J&J wins talc appeal", "Johnson & Johnson", "JNJ")
+    assert not names_company("Apple v. Samsung goes to court", "Visa Inc.", "V")                   # a lone "V" is not Visa
+    assert names_company("Visa shares rise", "Visa Inc.", "V")
+    assert names_company("Acme Robotics wins a deal", "Acme Robotics Inc.", "ACME")                # outside the list
+    assert news_query("Apple Inc.", "AAPL").startswith('"Apple" (shares')                         # cached queries unchanged
+    assert news_query("Alphabet Inc.", "GOOGL").startswith('("Alphabet" OR "Google" OR "YouTube")')

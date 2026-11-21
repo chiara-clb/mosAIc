@@ -35,13 +35,46 @@ def news_name(company: str, ticker: str, overrides: dict | None = None) -> str:
     return " ".join(name.split()) or ticker
 
 
+# The names headlines actually use for each stock in the universe. Without them the filter keeps only
+# headlines with the first word of the legal name, which misses "Google" for Alphabet and is far too broad
+# for "Johnson & Johnson" ("johnson") or American Tower ("american").
+NEWS_NAMES = {
+    "AAPL": ["Apple"], "AMT": ["American Tower"], "AMZN": ["Amazon", "AWS"], "BA": ["Boeing"],
+    "CAT": ["Caterpillar"], "CVX": ["Chevron"], "DUK": ["Duke Energy"], "FCX": ["Freeport-McMoRan", "Freeport"],
+    "GOOGL": ["Alphabet", "Google", "YouTube"], "GS": ["Goldman Sachs", "Goldman"], "INTC": ["Intel"],
+    "JNJ": ["Johnson & Johnson", "J&J"], "JPM": ["JPMorgan", "JP Morgan", "Jamie Dimon"], "KO": ["Coca-Cola", "Coke"],
+    "LIN": ["Linde"], "LLY": ["Eli Lilly", "Lilly"], "LMT": ["Lockheed Martin", "Lockheed"],
+    "META": ["Meta", "Facebook", "Instagram", "WhatsApp"], "MSFT": ["Microsoft", "Azure"], "NEE": ["NextEra"],
+    "NFLX": ["Netflix"], "NKE": ["Nike"], "NVDA": ["Nvidia"], "PG": ["Procter & Gamble", "P&G"], "PLD": ["Prologis"],
+    "TSLA": ["Tesla"], "UNH": ["UnitedHealth", "Optum"], "V": ["Visa"], "WMT": ["Walmart"], "XOM": ["Exxon", "ExxonMobil"],
+}
+
+
+def news_terms(company: str, ticker: str) -> list[str]:
+    """The names a headline may use for the company: the list above, or the cleaned legal name."""
+    return NEWS_NAMES.get(ticker.upper()) or [news_name(company, ticker)]
+
+
 def news_query(company: str, ticker: str) -> str:
-    return f'"{news_name(company, ticker)}" (shares OR stock OR earnings OR analyst) sourcelang:english'
+    terms = news_terms(company, ticker)
+    names = f'"{terms[0]}"' if len(terms) == 1 else "(" + " OR ".join(f'"{t}"' for t in terms) + ")"
+    return f"{names} (shares OR stock OR earnings OR analyst) sourcelang:english"
+
+
+def names_company(title: str, company: str, ticker: str) -> bool:
+    """True if the headline names the company: its ticker, one of its usual names, or (for stocks outside
+    the list) the first word of its legal name."""
+    low = title.lower()
+    if len(ticker) > 1 and re.search(rf"\b{re.escape(ticker.lower())}\b", low):     # "V" alone is too common
+        return True
+    if ticker.upper() in NEWS_NAMES:
+        return any(re.search(rf"(?<![a-z]){re.escape(t.lower())}(?![a-z])", low) for t in NEWS_NAMES[ticker.upper()])
+    words = [w for w in news_name(company, ticker).lower().split() if len(w) > 2]
+    return bool(words) and words[0] in low
 
 
 def parse_articles(payload: dict | None, as_of: datetime, company: str, ticker: str) -> list[dict]:
     """GDELT article list -> headlines first seen before as_of that name the company, without copies or option talk."""
-    name_words = [w for w in news_name(company, ticker).lower().split() if len(w) > 2]
     out, seen_titles = [], set()
     for a in (payload or {}).get("articles", []):
         try:
@@ -50,7 +83,7 @@ def parse_articles(payload: dict | None, as_of: datetime, company: str, ticker: 
             continue
         title = " ".join(str(a.get("title", "")).split())
         low = title.lower()
-        names_it = bool(re.search(rf"\b{re.escape(ticker.lower())}\b", low)) or (name_words and name_words[0] in low)
+        names_it = names_company(title, company, ticker)
         if seen >= as_of or not title or ANSWER_KEY_LEAK.search(title) or not names_it or low in seen_titles:
             continue
         seen_titles.add(low)
