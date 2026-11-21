@@ -111,7 +111,23 @@ if mode.startswith("Results"):
     left.table(table.map(lambda v: "–" if pd.isna(v) else f"{v:.1f}"))
     chart = table[["Fall %", "Flat %", "Gain %"]].dropna()
     if len(chart):
-        right.bar_chart(chart.T, stack=False)
+        chart.index = [b.split(" ·")[0] for b in chart.index]              # short legend names: B1, B2, B3
+        chart.columns = ["Large fall", "Flat", "Large gain"]
+        try:
+            import altair as alt
+            long = chart.reset_index(names="Baseline").melt("Baseline", var_name="Outcome", value_name="Percent")
+            right.altair_chart(
+                alt.Chart(long).mark_bar()
+                .encode(x=alt.X("Outcome:N", sort=list(chart.columns), title=None, axis=alt.Axis(labelAngle=0)),
+                        xOffset=alt.XOffset("Baseline:N", sort=list(chart.index)),
+                        y=alt.Y("Percent:Q", title="%", scale=alt.Scale(domain=[0, 100])),
+                        color=alt.Color("Baseline:N", sort=list(chart.index),
+                                        legend=alt.Legend(orient="bottom", title=None)),
+                        tooltip=["Baseline", "Outcome", alt.Tooltip("Percent:Q", format=".1f")])
+                .properties(height=280), use_container_width=True)
+        except Exception:                                        # an older Altair: plain side-by-side bars
+            right.bar_chart(chart.T, stack=False)
+        right.caption("B1 one year of daily moves · B2 previous results days · B3 options at the close")
     if rd.actual:
         st.success(f"What happened: **{rd.actual['move'] * 100:+.1f}%** on {rd.t1}, a **{rd.actual['outcome']}**.")
     for n in rd.notes:
