@@ -1,6 +1,6 @@
 # Results so far
 
-Sections 1 to 3 come from the three notebooks, and section 4 from `python -m mosaic.ablation`. None of them uses the option-implied answer key yet, so forecasts are scored against what actually happened (Brier score: lower is better). The answer-key scoring will be added once the option data is loaded.
+Sections 1 to 3 come from the three notebooks, section 4 from `python -m mosaic.ablation` and section 5 from `python -m mosaic.evaluate`. Sections 1 to 4 do not use the option-implied answer key yet, so forecasts are scored against what actually happened (Brier score: lower is better). The answer-key scoring will be added once the option data is loaded.
 
 ## 1. Which baseline
 
@@ -79,3 +79,22 @@ With a real model (Qwen2.5-3B), the coordination held: the critic's hint led res
 | No forecast-date rule | 0 | 0 | 8 | 1 / 6 / 2 |
 
 Each guardrail stops a different failure, and no other guardrail covers for it. Switching off either the cleaned extracts or the role check lets one hidden instruction through, so the two are not redundant. Without the risk gate every forecast is published, including the rare-event one that should wait for the analyst.
+
+## 5. Real stocks against the option market
+
+`python -m mosaic.evaluate`: AAPL, MSFT and JPM, every Wednesday from 1 July to 19 August 2026, after Claude's knowledge cutoff. 23 forecasts with Claude Haiku 5.5, news from GDELT. The main score is log loss against the probabilities implied by FirstRate option prices on the forecast date (lower is better).
+
+| Variant | Log loss vs options | Difference from baseline (95% interval) | Log loss vs outcome | Brier vs outcome | Model calls per forecast |
+| --- | --- | --- | --- | --- | --- |
+| **Baseline (version C)** | **1.0897** | | 1.0708 | 0.6473 | 0 |
+| Prompt only | 1.1182 | +0.0285 (+0.0105 to +0.0464) | 1.0795 | 0.6635 | 1 |
+| Baseline + the model's memory | 1.0894 | −0.0002 (−0.0005 to −0.0000) | 1.0675 | 0.6451 | 1 |
+| Single pass | 1.0966 | +0.0070 (−0.0032 to +0.0218) | 1.1171 | 0.6798 | 10.8 |
+| Tree of Thought (the design) | 1.0937 | +0.0040 (−0.0004 to +0.0093) | 1.0737 | 0.6497 | 10.9 |
+
+What this shows:
+
+- **No variant beat the price baseline against the option market.**
+- **The prompt-only model is the only clear difference, and it is worse.**
+- **Tree of Thought did better than a single pass,** most clearly against what actually happened (Brier 0.650 against 0.680). Comparing readings avoided the first reading's mistakes, as in section 2.
+- **The test is small** (3 stocks, 8 weeks) and GDELT refused many news requests, so many forecasts had little evidence and the intervals are wide.
