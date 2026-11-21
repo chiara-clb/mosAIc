@@ -24,3 +24,14 @@ def test_prefetch_keeps_going_after_a_failure(tmp_path):
 
     table = prefetch(["AAPL", "MSFT"], [datetime(2026, 7, 15, tzinfo=UTC)], world_factory=broken, log=lambda m: None)
     assert len(table) == 2 and table["error"].str.contains("SEC down").all()
+
+
+def test_prefetch_can_run_just_a_few_chosen_dates():
+    from mosaic.prefetch import parse_pairs
+    pairs = parse_pairs("aapl:2026-08-05, INTC:2026-07-29")
+    assert pairs == [("AAPL", datetime(2026, 8, 5, tzinfo=UTC)), ("INTC", datetime(2026, 7, 29, tzinfo=UTC))]
+    world = make_demo_world()
+    seen = []
+    table = prefetch(["MSFT"], [datetime(2026, 7, 1, tzinfo=UTC)], world_factory=lambda t, d: (seen.append((t, d)), (world, 0))[1],
+                     pairs=pairs, log=lambda m: None)
+    assert seen == pairs and list(table["ticker"]) == ["AAPL", "INTC"]
