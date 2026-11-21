@@ -63,6 +63,10 @@ with st.sidebar:
         rd_ticker = st.selectbox("Stock", sorted(UNIVERSE), index=sorted(UNIVERSE).index("AMZN"))
         rd_day = st.date_input("Release day (reported after the close)", date(2026, 7, 30))
         rd_options = st.text_input("Folder of FirstRate option files", "data/firstrate")
+        rd_consensus = st.text_input("Folder of consensus estimates", "data/consensus")
+        rd_model = st.text_input("Claude model for the release reader", "claude-haiku-5-5")
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            st.warning("ANTHROPIC_API_KEY is not set: the baselines work, the release reader does not.")
         rd_go = st.button("Show the baselines", type="primary")
         go = False
     else:
@@ -92,6 +96,7 @@ if mode.startswith("Results"):
                "A large move is beyond half the size of the stock's last eight results-day moves. "
                "Three baselines, all known before the release. No model is called.")
     if rd_go:
+        st.session_state["reading"] = None
         with st.spinner("Loading SEC results dates, prices and option quotes…"):
             try:
                 st.session_state["rd"] = load_live(rd_ticker, rd_day, rd_options or None)
@@ -99,6 +104,7 @@ if mode.startswith("Results"):
                 st.session_state["rd"] = None
                 st.error(f"Could not compute the baselines: {exc}")
     rd = st.session_state.get("rd")
+    reading = st.session_state.get("reading")
     if rd is None:
         st.info("Choose a stock and the day it reported after the close, for example AMZN 2026-07-30, "
                 "NVDA 2026-08-26 or GOOGL 2026-07-22, and press **Show the baselines**.")
@@ -107,6 +113,12 @@ if mode.startswith("Results"):
                 f"{rd.t0}. A large move is beyond **±{rd.tau * 100:.1f}%** "
                 f"(half of {rd.J * 100:.1f}%, the typical size of its last {len(rd.past_moves)} results-day moves).")
     table = pd.DataFrame(rd_rows(rd)).set_index("Baseline")
+    if reading is not None and reading.forecast:
+        mosaic_row = {"Fall %": reading.forecast["fall"], "Flat %": reading.forecast["flat"],
+                      "Gain %": reading.forecast["gain"]}
+        if rd.actual:
+            mosaic_row["Chance given to what happened %"] = reading.forecast[rd.actual["outcome"]]
+        table.loc["MosAIc · after reading the release"] = mosaic_row
     left, right = st.columns([3, 2])
     left.table(table.map(lambda v: "–" if pd.isna(v) else f"{v:.1f}"))
     chart = table[["Fall %", "Flat %", "Gain %"]].dropna()
@@ -127,15 +139,50 @@ if mode.startswith("Results"):
                 .properties(height=280), use_container_width=True)
         except Exception:                                        # an older Altair: plain side-by-side bars
             right.bar_chart(chart.T, stack=False)
-        right.caption("B1 one year of daily moves · B2 previous results days · B3 options at the close")
+        right.caption("B1 one year of daily moves · B2 previous results days · B3 options at the close"
+                      + (" · MosAIc: B3 adjusted by the release reader's ledger" if reading is not None and reading.forecast else ""))
     if rd.actual:
         st.success(f"What happened: **{rd.actual['move'] * 100:+.1f}%** on {rd.t1}, a **{rd.actual['outcome']}**.")
     for n in rd.notes:
         st.caption("Note: " + n)
     with st.expander("The previous results-day moves behind the barrier"):
         plain_table([{"Reaction day": d, "Move %": round(m * 100, 1)} for d, m in rd.past_moves])
-    st.caption("Next step: an agent that reads the release itself and adjusts these baselines, scored against what "
-               "happened. A prototype of it is described in the report.")
+
+    st.markdown("#### The release reader")
+    st.caption("An agent reads the press release (Exhibit 99.1 of the results 8-K) next to the baselines and the "
+               "analysts' consensus, and writes a ledger with exact quotes. Code checks every quote and sends the "
+               "ledger back once if one fails; the ledger then adjusts B3. The agent has no tools.")
+    if st.button("Read the release with Claude", disabled=rd.baselines.get("B3") is None):
+        from mosaic.llm import make_model
+        from mosaic.release_reader import fetch_release, load_consensus, read_release
+        with st.spinner("Fetching the press release and reading it…"):
+            try:
+                text = fetch_release(rd.ticker, rd.release)
+                consensus = load_consensus(rd_consensus, rd.ticker, rd.t0) if rd_consensus else []
+                st.session_state["reading"] = read_release(text, rd.baselines, rd.tau, consensus,
+                                                           make_model("anthropic", model_name=rd_model), rd.ticker)
+                st.session_state["consensus_n"] = len(consensus)
+            except Exception as exc:
+                st.error(f"The release reader could not run: {exc}")
+        st.rerun()
+    if reading is not None:
+        from mosaic.release_reader import ledger_rows as release_ledger
+        n = st.session_state.get("consensus_n", 0)
+        st.markdown(f"**Status:** {reading.status} · consensus values given: {n} · retries: {reading.retries}"
+                    + (f" · confidence: {reading.confidence}" if reading.confidence else ""))
+        if reading.flags:
+            st.warning("Flagged for the analyst: " + "; ".join(reading.flags))
+        if reading.read:
+            st.markdown(f"> {reading.read}")
+        plain_table(release_ledger(reading), empty="No ledger: the options baseline is reported.")
+        with st.expander("Full log of the reading (model replies and checks)"):
+            log = []
+            for e in reading.trace.events:
+                if e["kind"] == "model_call":
+                    log.append(f"Release reader reply (parsed: {e.get('parsed')}):\n{e.get('reply', '')}")
+                else:
+                    log.append(f"Critic: {e.get('note', '')}")
+            st.code("\n\n".join(log), language=None)
     st.stop()
 
 if go:
