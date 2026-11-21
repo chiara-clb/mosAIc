@@ -102,7 +102,7 @@ What this shows:
 
 ## 6. Results day: a demonstration on three releases
 
-`python -m mosaic.results_day --read`, Claude Haiku 5.5, Q2 2026 releases after the close. This is a demonstration of the flow and its guardrails, not an evaluation: three events cannot tell whether the reader helps.
+`python -m mosaic.results_day --read`, Claude Haiku 5.5, Q2 2026 releases after the close. It was added late, so this is only a demonstration of the flow and its guardrails. Three events cannot tell whether the reader helps.
 
 | | Alphabet (GOOGL) | Nvidia (NVDA) | Amazon (AMZN) |
 | --- | --- | --- | --- |
@@ -114,8 +114,8 @@ What this shows:
 What this shows:
 
 - **The reader separated operating results from one-off items,** such as investment gains, and quoted the release for every line.
-- **The guardrails acted as designed.** On Amazon the critic found a quote that was not in the release and sent it back with the reason, and the corrected line passed. On Nvidia the risk gate flagged a large shift for the analyst.
-- **One event shows the limits.** Amazon rose 14.3%, but the reader weighed negative free cash flow above the AWS beat and leaned slightly towards a fall.
+- **The guardrails caught two problems.** On Amazon the critic found a quote that was not in the release and sent it back with the reason, and the corrected line passed. On Nvidia the risk gate flagged a large shift for the analyst.
+- **Correct quotes did not make a correct reading.** Amazon rose 14.3%, but the reader gave more weight to negative free cash flow than to the AWS beat and leaned slightly towards a fall. The critic checks quotes. It cannot check judgement.
 - **No data leaked.** The leakage audit was clean on all three runs, and the next-day move appears only in the log section marked as after the run.
 
 An earlier prototype of this design, on 40 releases from 2026, scored a log loss of 1.040 against 1.084 for the best baseline (past results-day moves) and 1.102 for the options at the close. The intervals overlap, so this needs more events.
