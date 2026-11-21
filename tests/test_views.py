@@ -23,7 +23,9 @@ def test_tables_from_a_normal_run():
 def test_reviewed_ledger_and_a_baseline_run():
     state, _, _ = run_scenario("9 rare event, big move", engine=ENGINE)
     reviewed = apply_review(state, {"F1": "strike"})
-    assert [r["Source"] for r in ledger_rows(state, reviewed)] == ["S2"]
+    rows = ledger_rows(state, reviewed)
+    assert [(r["Source"], r["Analyst decision"]) for r in rows] == [("F1", "struck"), ("S2", "kept")]
+    assert [x["source"] for x in reviewed["ledger"]] == ["S2"]           # only kept lines count in the forecast
     base_state, base_run, _ = run_scenario("6 tool down", engine=ENGINE)
     assert ledger_rows(base_state) == [] and tot_rows(base_state) == []
     assert run_facts(base_state, base_run)["why"]
@@ -77,3 +79,25 @@ def test_the_text_log_has_everything_including_raw_model_replies():
     assert "Synthesis agent (Tree of Thought) model reply (limit 400 tokens):" in log
     assert '"readings"' in log                                     # the raw JSON the model sent
     assert log.count("model reply") == run.model.calls
+
+
+def test_a_reviewed_forecast_shows_the_agent_and_the_analyst_side_by_side():
+    from mosaic.graph import run_forecast
+    from mosaic.llm import make_model
+    from mosaic.risk import apply_review
+    from mosaic.views import forecast_rows, ledger_rows, review_summary, text_log
+    from mosaic.world import make_demo_world
+
+    state, run = run_forecast(make_demo_world(), make_model("scripted"))
+    first, second = [x["source"] for x in state["final"]["ledger"]][:2]
+    reviewed = apply_review(state, {first: "strike", second: ("resize", "large")})
+
+    assert review_summary(state["final"]) is None
+    assert review_summary(reviewed) == "Reviewed by the analyst: 0 kept, 1 struck, 1 resized"
+    row = forecast_rows(reviewed)[0]
+    assert set(row) == {"Outcome", "Baseline %", "Agent %", "Analyst %", "Agent change", "Analyst change"}
+    assert row["Agent %"] == round(state["final"]["probabilities"]["fall"], 1)
+    lines = {r["Source"]: r for r in ledger_rows(state, reviewed)}
+    assert lines[first]["Analyst decision"] == "struck"                    # struck lines stay visible
+    assert lines[second]["Analyst decision"] == "resized to large" and lines[second]["Size"].endswith("(agent)")
+    assert "REVIEWED BY THE ANALYST" in text_log(state, run, reviewed)

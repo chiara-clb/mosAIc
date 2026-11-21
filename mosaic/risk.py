@@ -62,7 +62,7 @@ def apply_review(state: dict, decisions: dict, log: ReviewLog | None = None) -> 
     """Analyst decisions per source: "keep", "strike" or ("resize", size). Returns the reviewed final forecast."""
     final = state["final"]
     events = {e["id"]: e.get("event", "?") for e in state.get("evidence") or []}
-    kept = []
+    kept, record = [], []
     for line in final["ledger"]:
         d = decisions.get(line["source"], "keep")
         action, size = (d[0], d[1]) if isinstance(d, tuple) else (d, line["size"])
@@ -72,7 +72,10 @@ def apply_review(state: dict, decisions: dict, log: ReviewLog | None = None) -> 
             log.entries.append({"source": line["source"], "event": events.get(line["source"], "?"),
                                 "effect": line["effect"], "action": action, "from": line["size"],
                                 "to": size if action == "resize" else None})
+        record.append({"source": line["source"], "effect": line["effect"], "agent_size": line["size"],
+                       "action": action, "analyst_size": None if action == "strike" else size})
         if action != "strike":
             kept.append({**line, "size": size, "shift": shift_for(line["effect"], size)})
     probs, _ = apply_ledger(final["baseline"], kept)
-    return {**final, "ledger": kept, "probabilities": probs, "status": "reviewed by analyst"}
+    return {**final, "ledger": kept, "probabilities": probs, "status": "reviewed by analyst",
+            "agent_probabilities": final["probabilities"], "agent_ledger": final["ledger"], "review_record": record}

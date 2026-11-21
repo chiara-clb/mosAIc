@@ -12,18 +12,45 @@ LABELS = {"fall": "Large fall", "flat": "Flat", "gain": "Large gain"}
 
 
 def forecast_rows(final: dict) -> list[dict]:
-    """One row per outcome: baseline, forecast and the change in points."""
+    """One row per outcome: baseline, forecast and the change in points.
+
+    After an analyst review: baseline, the agent's forecast, the analyst's forecast, and each change.
+    """
+    if "agent_probabilities" in final:
+        a, b, r = final["agent_probabilities"], final["baseline"], final["probabilities"]
+        return [{"Outcome": LABELS[k], "Baseline %": round(b[k], 1), "Agent %": round(a[k], 1),
+                 "Analyst %": round(r[k], 1), "Agent change": round(a[k] - b[k], 1),
+                 "Analyst change": round(r[k] - a[k], 1)} for k in OUTCOMES]
     return [{"Outcome": LABELS[k], "Baseline %": round(final["baseline"][k], 1),
              "Forecast %": round(final["probabilities"][k], 1),
              "Change (points)": round(final["probabilities"][k] - final["baseline"][k], 1)} for k in OUTCOMES]
 
 
+def review_summary(final: dict) -> str | None:
+    """"Reviewed by the analyst: 1 kept, 1 struck, 0 resized", or None if not reviewed."""
+    rec = final.get("review_record")
+    if rec is None:
+        return None
+    n = {a: sum(r["action"] == a for r in rec) for a in ("keep", "strike", "resize")}
+    return f"Reviewed by the analyst: {n['keep']} kept, {n['strike']} struck, {n['resize']} resized"
+
+
 def ledger_rows(state: dict, final: dict | None = None) -> list[dict]:
+    """The ledger lines. After an analyst review, every line the agent proposed, with the analyst's decision."""
     final = final or state["final"]
     dates = {e["id"]: e["published"] for e in state.get("evidence") or []}
-    return [{"Source": x["source"], "Published": f"{dates[x['source']]:%Y-%m-%d}" if x["source"] in dates else "-",
-             "Effect": x["effect"], "Size": x["size"], "Quote": x["quote"], "Reason": x.get("reason", ""),
-             "Past cases": x.get("n")} for x in final["ledger"]]
+    decided = {r["source"]: r for r in final.get("review_record") or []}
+    rows = []
+    for x in final.get("agent_ledger") or final["ledger"]:
+        row = {"Source": x["source"], "Published": f"{dates[x['source']]:%Y-%m-%d}" if x["source"] in dates else "-",
+               "Effect": x["effect"], "Size": x["size"]}
+        if decided:
+            r = decided.get(x["source"], {"action": "keep"})
+            row["Size"] = f"{x['size']} (agent)"
+            row["Analyst decision"] = {"keep": "kept", "strike": "struck"}.get(r["action"]) or f"resized to {r['analyst_size']}"
+        row.update({"Quote": x["quote"], "Reason": x.get("reason", ""), "Past cases": x.get("n")})
+        rows.append(row)
+    return rows
 
 
 def evidence_rows(state: dict) -> list[dict]:
@@ -106,15 +133,20 @@ def _table(rows: list[dict]) -> list[str]:
     return ["  " + " | ".join(f"{k}: {v}" for k, v in r.items()) for r in rows]
 
 
-def text_log(state: dict, run) -> str:
-    """The whole run as plain text, to copy and paste: result, ledger, evidence, Tree of Thought, every event."""
-    req, final, facts = state["request"], state["final"], run_facts(state, run)
+def text_log(state: dict, run, final: dict | None = None) -> str:
+    """The whole run as plain text, to copy and paste: result, ledger, evidence, Tree of Thought, every event.
+
+    `final`: the analyst-reviewed forecast, if there is one.
+    """
+    req, final, facts = state["request"], final or state["final"], run_facts(state, run)
     out = [f"MosAIc run {run.tools.trace.run_id}: {req['company']} ({req['ticker']}) as of {req['as_of']:%Y-%m-%d}",
            f"Model: {facts['model']}, {facts['model_calls']} calls | tool calls: {facts['tool_calls']} | "
            f"retries: {facts['retries']} | leakage audit: {facts['leakage']}",
            f"Status: {final['status']} | risk gate: {facts['review']}" +
            (f" ({'; '.join(facts['triggers'])})" if facts["triggers"] else ""),
            "", "FORECAST"] + _table(forecast_rows(final))
+    if review_summary(final):
+        out += ["", review_summary(final).upper()]
     out += ["", "LEDGER"] + _table(ledger_rows(state, final))
     out += ["", "EVIDENCE"] + _table(evidence_rows(state))
     out += ["", "TREE OF THOUGHT"] + _table(tot_rows(state))
