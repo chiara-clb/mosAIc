@@ -68,6 +68,15 @@ python -m mosaic.cli AAPL --as-of 2026-07-15 --backend anthropic --model claude-
 
 Filings, prices and news are cached under `data/`, so a second run on the same stock is fast.
 
+**In the browser** (a simple Streamlit screen):
+
+```bash
+pip install -e ".[ui]"
+streamlit run app.py
+```
+
+Choose the demo company and a scenario (or a real stock), press **Run forecast**, and see the forecast against the baseline, the ledger with its sources and dates, the risk gate's decision, and how the agents got there: evidence, every Tree of Thought reading with its scores, each step and each tool call. A held forecast can be reviewed line by line (keep, resize or strike).
+
 **In a notebook, no setup needed:** open `notebooks/multi_agent/checkpoint5_multi_agent.ipynb` in Google Colab and choose Run all. It runs in seconds on a small synthetic company and shows nine scenarios, including the guardrails at work. To use a real model, set `MODE = "real"` in section 1 (needs a GPU runtime for Qwen, or an Anthropic API key).
 
 **The tests, locally:**
