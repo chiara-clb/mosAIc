@@ -3,6 +3,7 @@
     python -m mosaic.cli --demo                       one forecast on the demo company
     python -m mosaic.cli --demo --scenario all        all nine guardrail scenarios, as a table
     python -m mosaic.cli --demo --backend anthropic   the demo company with Claude (needs ANTHROPIC_API_KEY)
+    python -m mosaic.cli --demo --backend crewai      the same, with the agents run by CrewAI (pip install -e '.[crew]')
     python -m mosaic.cli AAPL --as-of 2026-07-15      a real stock (live data; set MOSAIC_SEC_USER_AGENT)
 
 Each forecast writes report.md, state.json and trace.jsonl under runs/<ticker>-<date>/.
@@ -40,8 +41,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--as-of", help="forecast date, YYYY-MM-DD (start of that day)")
     p.add_argument("--demo", action="store_true", help="use the synthetic demo company")
     p.add_argument("--scenario", default="1 normal", help='demo scenario name, or "all"')
-    p.add_argument("--backend", default="scripted", choices=["scripted", "anthropic", "hf"])
-    p.add_argument("--model", default=None, help="model name for the anthropic or hf backend")
+    p.add_argument("--backend", default="scripted", choices=["scripted", "anthropic", "hf", "crewai"])
+    p.add_argument("--model", default=None, help="model name for the anthropic, hf or crewai backend")
     p.add_argument("--out", default="runs", help="folder for the outputs")
     return p.parse_args(argv)
 

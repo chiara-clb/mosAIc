@@ -111,3 +111,18 @@ def test_with_the_real_package_if_installed():
     crewai = pytest.importorskip("crewai")
     agents = crew_agents(llm=crew_llm("claude-haiku-5-5", crewai), crewai=crewai)
     assert set(agents) == set(ROLES) and agents["research"].role == ROLES["research"]["role"]
+
+
+def test_cli_runs_the_demo_through_crewai(monkeypatch, tmp_path, capsys):
+    from mosaic.cli import main
+    monkeypatch.setitem(sys.modules, "crewai", fake_crewai())
+    assert main(["--demo", "--backend", "crewai", "--model", "claude-haiku-5-5", "--out", str(tmp_path)]) == 0
+    assert "Model backend: crewai" in capsys.readouterr().out
+    report = (tmp_path / "1_normal" / "ACME-2025-06-02" / "report.md").read_text()
+    assert "crewai:claude-haiku-5-5" in report
+
+
+def test_app_offers_the_crewai_backend():
+    from pathlib import Path
+    app = (Path(__file__).resolve().parents[1] / "app.py").read_text()
+    assert '"crewai"]' in app

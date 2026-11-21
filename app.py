@@ -29,9 +29,10 @@ st.caption("Probability of a large fall, a flat month or a large gain over the n
 with st.sidebar:
     st.header("Forecast")
     mode = st.radio("Company", ["Demo company (synthetic)", "Real stock"])
-    backend = st.selectbox("Model", ["scripted", "anthropic"],
-                           help="scripted: answers written in advance, no key needed. anthropic: Claude, needs ANTHROPIC_API_KEY.")
-    model_name = st.text_input("Claude model", "claude-haiku-5-5") if backend == "anthropic" else None
+    backend = st.selectbox("Model", ["scripted", "anthropic", "crewai"],
+                           help="scripted: answers written in advance, no key needed. anthropic: Claude, needs "
+                                "ANTHROPIC_API_KEY. crewai: Claude through the agents' CrewAI role cards.")
+    model_name = st.text_input("Claude model", "claude-haiku-5-5") if backend in ("anthropic", "crewai") else None
     if mode.startswith("Demo"):
         scenario = st.selectbox("Scenario", list(SCENARIOS), help="Each scenario plants one problem for the guardrails.")
         st.caption("Planted: " + SCENARIOS[scenario]["plant"])
@@ -40,7 +41,7 @@ with st.sidebar:
         as_of = st.date_input("Forecast date (start of day)", date(2026, 7, 15))
         if not SETTINGS.sec_user_agent:
             st.warning("Set MOSAIC_SEC_USER_AGENT to 'Your Name your.email@example.com' before running a real stock.")
-    if backend == "anthropic" and not os.environ.get("ANTHROPIC_API_KEY"):
+    if backend in ("anthropic", "crewai") and not os.environ.get("ANTHROPIC_API_KEY"):
         st.warning("ANTHROPIC_API_KEY is not set.")
     go = st.button("Run forecast", type="primary")
     st.caption(f"Graph engine: {graph_engine()[3]}")
