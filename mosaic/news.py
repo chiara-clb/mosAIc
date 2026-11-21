@@ -109,7 +109,7 @@ class Gdelt:
     """GDELT DOC API calls, cached on disk and spaced 5 seconds apart, as GDELT asks."""
 
     def __init__(self, cache_file: str | Path | None = None, http_get: Callable[[dict], dict] | None = None,
-                 spacing: float | None = None, retries: int = 2):
+                 spacing: float | None = None, retries: int = 3):
         self.cache_file = Path(cache_file or Path(SETTINGS.data_dir) / "gdelt_cache.json")
         self.cache = json.loads(self.cache_file.read_text()) if self.cache_file.exists() else {}
         self.http_get = http_get or self._requests_get
@@ -137,7 +137,8 @@ class Gdelt:
             return self.cache[key]
         error = ""
         for attempt in range(self.retries + 1):
-            wait = self.spacing * (1 + 2 * attempt) - (time.time() - self._last)
+            # After a refusal GDELT wants a real pause: 5 s, then 30 s, 90 s, 180 s with the defaults.
+            wait = (self.spacing if attempt == 0 else self.spacing * 6 * 3 ** (attempt - 1)) - (time.time() - self._last)
             if wait > 0:
                 time.sleep(wait)
             self._last = time.time()
