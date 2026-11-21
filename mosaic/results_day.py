@@ -234,7 +234,8 @@ def main(argv=None) -> int:                                        # pragma: no 
     p.add_argument("ticker")
     p.add_argument("release_day", help="the day of the after-close release, YYYY-MM-DD")
     p.add_argument("--options-dir", default=None)
-    p.add_argument("--read", action="store_true", help="also run the release reader (Claude, needs ANTHROPIC_API_KEY)")
+    p.add_argument("--read", action="store_true",
+                   help="also run the results-day agents: release reader, critic, risk gate (needs ANTHROPIC_API_KEY)")
     p.add_argument("--consensus-dir", default="data/consensus")
     p.add_argument("--model", default="claude-haiku-5-5")
     a = p.parse_args(argv)
@@ -247,20 +248,28 @@ def main(argv=None) -> int:                                        # pragma: no 
         print(f"Actual: {rd.actual['move'] * 100:+.1f}% on {rd.t1} → {rd.actual['outcome']}")
     for n in rd.notes:
         print("Note:", n)
-    if a.read:
+    if a.read:                       # the full results-day flow: the same graph as the app
+        from pathlib import Path
+
         from mosaic.llm import make_model
-        from mosaic.release_reader import fetch_release, ledger_rows, load_consensus, read_release
-        consensus = load_consensus(a.consensus_dir, rd.ticker, rd.t0)
-        r = read_release(fetch_release(rd.ticker, rd.release), rd.baselines, rd.tau, consensus,
-                         make_model("anthropic", model_name=a.model), rd.ticker)
-        print(f"\nRelease reader: {r.status} ({len(consensus)} consensus values, {r.retries} retries)")
-        if r.read:
-            print(r.read)
-        if r.forecast:
-            print("MosAIc after the release:", r.forecast)
-        print(pd.DataFrame(ledger_rows(r)).to_string(index=False) if r.ledger else "No ledger.")
-        for f in r.flags:
-            print("Flag:", f)
+        from mosaic.results_graph import live_results_case, run_results_day
+        from mosaic.views import progress_line, text_log
+        print("\nRunning the results-day agents:")
+        world, _ = live_results_case(rd.ticker, rd.t0, a.options_dir, a.consensus_dir)
+        state, run = run_results_day(world, make_model("anthropic", model_name=a.model),
+                                     on_event=lambda e: (line := progress_line(e)) and print(line))
+        final = state["final"]
+        print(f"\n{final['status']} · risk gate: {final.get('review')}")
+        for t in final.get("triggers") or []:
+            print("  -", t)
+        if final.get("read"):
+            print("Reader:", final["read"])
+        print("MosAIc:", final["probabilities"], "  (B3:", final["baseline"], ")")
+        out = Path("runs") / run.tools.trace.run_id
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "log.txt").write_text(text_log(state, run), encoding="utf-8")
+        run.tools.trace.write_jsonl(out / "trace.jsonl")
+        print(f"Full log and trace: {out}/")
     return 0
 
 
