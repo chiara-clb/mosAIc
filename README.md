@@ -110,7 +110,7 @@ python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate       
 python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate --read   # the full flow, with Claude
 ```
 
-It is also the third choice in the app's sidebar. The option code and the ledger rule come from an earnings-release prototype, in which such an agent scored better than all three baselines on 40 releases (see the report). A research agent that writes an expectations brief before the release is the next step.
+It is also the third choice in the app's sidebar. A research agent that writes an expectations brief before the release is the next step.
 
 **In the browser** (a simple Streamlit screen):
 

@@ -120,5 +120,3 @@ What this shows:
 - **One clear hit and two small misses.** On Nvidia MosAIc gave the gain a 49% chance against 35% from the options. On Alphabet and Amazon it gave what happened a slightly lower chance than the options.
 - **Correct quotes did not make a correct reading.** Amazon rose 14.3%, but the reader gave more weight to negative free cash flow than to the AWS beat and leaned slightly towards a fall. The critic checks quotes. It cannot check judgement.
 - **No data leaked.** The leakage audit was clean on all three runs, and the next-day move appears only in the log section marked as after the run.
-
-An earlier prototype of this design, on 40 releases from 2026, scored a log loss of 1.040 against 1.084 for the best baseline (past results-day moves) and 1.102 for the options at the close. The intervals overlap, so this needs more events.
