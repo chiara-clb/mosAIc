@@ -82,7 +82,7 @@ Each guardrail stops a different failure, and no other guardrail covers for it. 
 
 ## 5. Real stocks against the option market
 
-`python -m mosaic.evaluate`: AAPL, MSFT and JPM, every Wednesday from 1 July to 19 August 2026, after Claude's knowledge cutoff. 23 forecasts with Claude Haiku 5.5, news from GDELT. The main score is log loss against the probabilities implied by FirstRate option prices on the forecast date (lower is better).
+`python -m mosaic.evaluate`: AAPL, MSFT and JPM, every Wednesday from 1 July to 19 August 2026, after Claude's knowledge cutoff. 24 stock-dates, of which 23 ran (one stopped with an error), with Claude Haiku 5.5 and news from GDELT. Asked before each forecast, the model claimed to remember the following month for none of them. The main score is log loss against the probabilities implied by FirstRate option prices on the forecast date (lower is better).
 
 | Variant | Log loss vs options | Difference from baseline (95% interval) | Log loss vs outcome | Brier vs outcome | Model calls per forecast |
 | --- | --- | --- | --- | --- | --- |
@@ -97,4 +97,5 @@ What this shows:
 - **No variant beat the price baseline against the option market.**
 - **The prompt-only model is the only clear difference, and it is worse.**
 - **Tree of Thought did better than a single pass,** most clearly against what actually happened (Brier 0.650 against 0.680). Comparing readings avoided the first reading's mistakes, as in section 2.
+- **All variants missed a rising market.** Every variant gave a large gain about a 33% chance, while large gains happened in about 60–67% of these weeks and large falls in about 12%.
 - **The test is small** (3 stocks, 8 weeks) and GDELT refused many news requests, so many forecasts had little evidence and the intervals are wide.
