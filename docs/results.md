@@ -94,8 +94,8 @@ Each guardrail stops a different failure, and no other guardrail covers for it. 
 
 What this shows:
 
-- **No variant beat the price baseline against the option market.**
-- **The prompt-only model is the only clear difference, and it is worse.**
+- **The agent's adjustments did not bring the forecast closer to the option market.** Tree of Thought ended slightly further from the market's view than the price baseline (1.0937 against 1.0897), within the margin of error. Baseline + memory was closer by 0.0002, because the model barely changed the baseline.
+- **Only the prompt-only model was clearly further away.**
 - **Tree of Thought did better than a single pass,** most clearly against what actually happened (Brier 0.650 against 0.680). Comparing readings avoided the first reading's mistakes, as in section 2.
 - **All variants missed a rising market.** Every variant gave a large gain about a 33% chance, while large gains happened in about 60–67% of these weeks and large falls in about 12%.
 - **The test is small** (3 stocks, 8 weeks) and GDELT refused many news requests, so many forecasts had little evidence and the intervals are wide.
