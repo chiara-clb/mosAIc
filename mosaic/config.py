@@ -82,6 +82,8 @@ class Settings:
     prior_strength: int = 20                         # pseudo-events pulling small samples toward all events
     base_rate_scale: float = 0.02                    # how fast a base-rate score moves away from 0.5
     news_days: int = 14                              # GDELT headlines before the forecast date
+    news_fetch_days: int = field(default_factory=lambda: int(os.environ.get("MOSAIC_NEWS_FETCH_DAYS", "7")))
+    # days of GDELT headlines downloaded for a real stock (one call per day); at most news_days
     tone_base_days: int = 60
     news_story_sim: float = 0.6
     news_min_articles: int = 2

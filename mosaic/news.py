@@ -180,7 +180,7 @@ class Gdelt:
         return {}
 
     def fetch(self, company: str, ticker: str, as_of: datetime, progress=None) -> tuple[dict, dict]:
-        """Headlines from the `news_days` days before as_of, asked for one day at a time.
+        """Headlines from the last `news_fetch_days` days before as_of, asked for one day at a time.
 
         GDELT returns at most 250 articles per call, newest first. For a widely covered company one
         call over two weeks only reaches back a day or so, so each day is a separate call. Days are
@@ -208,11 +208,15 @@ class Gdelt:
         return {"articles": articles}, tone
 
 
-def news_days(as_of: datetime) -> list[tuple[datetime, datetime]]:
-    """Whole UTC days before as_of's date: (00:00:00, 23:59:59) for each of the last `news_days` days."""
+def news_days(as_of: datetime, n: int | None = None) -> list[tuple[datetime, datetime]]:
+    """Whole UTC days before as_of's date: (00:00:00, 23:59:59) for each of the last `n` days.
+
+    By default `news_fetch_days` (7), set with MOSAIC_NEWS_FETCH_DAYS, never more than `news_days`.
+    """
+    n = min(n or SETTINGS.news_fetch_days, SETTINGS.news_days)
     last = as_of.astimezone(timezone.utc).date() if as_of.tzinfo else as_of.date()
     days = []
-    for k in range(SETTINGS.news_days, 0, -1):
+    for k in range(n, 0, -1):
         d = last - timedelta(days=k)
         start = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
         days.append((start, start + timedelta(hours=23, minutes=59, seconds=59)))
