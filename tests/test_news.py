@@ -121,3 +121,21 @@ def test_news_is_asked_for_one_whole_day_at_a_time(tmp_path):
     assert asked[-1] == ("20260714000000", "20260714235959")          # nothing from the forecast day itself
     assert len(asked) == 14 and len(news_days(as_of)) == 14
     assert len(arts["articles"]) == 15                                 # 14 days + one article seen every day, once
+
+
+def test_two_programs_sharing_the_cache_keep_each_others_answers(tmp_path):
+    f = tmp_path / "cache.json"
+    a = Gdelt(f, http_get=lambda p: {"from": "a"}, spacing=0)
+    b = Gdelt(f, http_get=lambda p: {"from": "b"}, spacing=0)      # both opened before either wrote
+    a({"q": 1})
+    b({"q": 2})
+    a({"q": 3})
+    fresh = Gdelt(f, http_get=lambda p: {"from": "new"}, spacing=0)
+    assert fresh({"q": 1}) == {"from": "a"} and fresh({"q": 2}) == {"from": "b"} and fresh({"q": 3}) == {"from": "a"}
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_a_broken_cache_file_is_treated_as_empty(tmp_path):
+    f = tmp_path / "cache.json"
+    f.write_text('{"half written')
+    assert Gdelt(f, http_get=lambda p: {"ok": 1}, spacing=0)({"q": 1}) == {"ok": 1}

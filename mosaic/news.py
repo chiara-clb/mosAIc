@@ -9,6 +9,7 @@ dropped, because option prices are the answer key.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -111,12 +112,26 @@ class Gdelt:
     def __init__(self, cache_file: str | Path | None = None, http_get: Callable[[dict], dict] | None = None,
                  spacing: float | None = None, retries: int = 3):
         self.cache_file = Path(cache_file or Path(SETTINGS.data_dir) / "gdelt_cache.json")
-        self.cache = json.loads(self.cache_file.read_text()) if self.cache_file.exists() else {}
+        self.cache = self._load()
         self.http_get = http_get or self._requests_get
         self.spacing = SETTINGS.gdelt_spacing_seconds if spacing is None else spacing
         self.retries = retries
         self.errors: list[str] = []          # failed calls in this session, so a run can say news was missing
         self._last = 0.0
+
+    def _load(self) -> dict:
+        try:
+            return json.loads(self.cache_file.read_text()) if self.cache_file.exists() else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save(self) -> None:
+        """Merge with what is on disk (another program may have added answers), then replace the file in one step."""
+        self.cache = {**self._load(), **self.cache}
+        self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.cache_file.with_name(f"{self.cache_file.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(self.cache))
+        os.replace(tmp, self.cache_file)
 
     @staticmethod
     def _requests_get(params: dict) -> dict:                 # pragma: no cover - needs internet
@@ -148,8 +163,7 @@ class Gdelt:
                 error = f"{type(e).__name__}: {e}"
                 continue
             self.cache[key] = payload
-            self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-            self.cache_file.write_text(json.dumps(self.cache))
+            self._save()
             return payload
         self.errors.append(f"{params.get('mode')}: {error}")
         print(f"Warning: GDELT news could not be fetched ({error}). The forecast will have no news.", file=sys.stderr)
