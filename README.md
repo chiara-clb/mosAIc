@@ -91,13 +91,26 @@ python -m mosaic.evaluate --backend anthropic --model claude-haiku-5-5 \
 
 Add `--limit 2` for a cheap first try. Results go to `results/evaluation/`, and `--resume` continues an interrupted run.
 
-**Results day (a first step towards forecasting right after results).** For a stock that reports after the close, three baselines for the move to the next day's close, all known before the release: one year of daily moves (B1), the stock's last eight results-day moves (B2), and the option prices at the close (B3, from the FirstRate files). No model is called, and the actual move is shown next to them:
+**Results day: forecasting right after results.** For a stock that reports after the close, the agents forecast the move to the next day's close, a few minutes after the release. It runs as a second LangGraph flow built from the same parts as the monthly forecast (`mosaic/results_graph.py`):
 
-```bash
-python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate
+```
+coordinator ─┬─> quant: B1, B2, B3 ───────┐
+             └─> fetch release (code) ────┴─> release reader (agent) ─> critic ─┬─> finalise ─┐
+                                                       ^                         ├─> fallback ─┴─> risk gate ─> publish | flag | hold
+                                                       └─── back with reasons ───┘
 ```
 
-Add `--read` to let the **release reader** agent read the press release next to the baselines and the analysts' consensus (`data/consensus/<TICKER>_<date>.json`, values only). It writes a ledger with exact quotes, a critic in code checks every quote, and the ledger adjusts the option baseline. It is also the third choice in the app's sidebar. The option code and the ledger rule come from an earnings-release prototype, in which such an agent scored better than all three baselines on 40 releases (see the report).
+- **Baselines, known before the release:** B1 from a year of daily moves, B2 from the last eight results-day moves, B3 from the option prices at the close (FirstRate files).
+- **The release reader** reads the press release (the 8-K's Exhibit 99.1) against the baselines and the analysts' consensus (`data/consensus/<TICKER>_<date>.json`, values only), and writes a ledger with exact quotes. It has no tools.
+- **The critic** checks every quote in code and sends failing lines back with reasons, at most twice. The ledger then tilts B3 into MosAIc's forecast, and the risk gate publishes, flags or holds it for the analyst, who can keep, resize or strike each line.
+- **Same safeguards:** the release reaches the agents only through the tool door, with role checks and the forecast-date rule. The next day's price is never shown to them.
+
+```bash
+python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate          # the three baselines only
+python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate --read   # the full flow, with Claude
+```
+
+It is also the third choice in the app's sidebar. The option code and the ledger rule come from an earnings-release prototype, in which such an agent scored better than all three baselines on 40 releases (see the report). A research agent that writes an expectations brief before the release is the next step.
 
 **In the browser** (a simple Streamlit screen):
 
