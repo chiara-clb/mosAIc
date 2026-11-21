@@ -101,6 +101,19 @@ def _evidence_item(hit: dict, full: dict, as_of) -> dict:
             "event": full["event"], "reaction": full["reaction"], "novelty": full["novelty"]}
 
 
+def one_per_filing(items: list[dict], tools: ToolBox) -> list[dict]:
+    """Keep only the best-scored passage of each filing (items come best first), so one filing cannot
+    fill several evidence slots and be counted several times."""
+    seen, out = set(), []
+    for e in items:
+        full = tools.passage(e["id"]) or {}
+        key = (full.get("chunk") or {}).get("filing") or e["id"]       # live filings share an accession number
+        if key not in seen:
+            seen.add(key)
+            out.append(e)
+    return out
+
+
 def research(state: dict, run: Run, agent: str = "research", full_text: bool = False) -> dict:
     req, tools = state["request"], run.tools
     hints = list(state.get("hints") or [])
@@ -140,7 +153,8 @@ def research(state: dict, run: Run, agent: str = "research", full_text: bool = F
         notes.append(f"no filing search by the model; code listed {len(hits)} recent filings")
         for h in hits:
             pool.setdefault(h["id"], _evidence_item(h, tools.passage(h["id"]), req["as_of"]))
-    items = same_story(sorted(pool.values(), key=lambda e: -e["score"]), req["company"])[:SETTINGS.k_final]
+    items = same_story(one_per_filing(sorted(pool.values(), key=lambda e: -e["score"]), tools), req["company"])
+    items = items[:SETTINGS.k_final]
     items = [handoff("evidence", e) for e in sorted(items, key=lambda e: e["published"], reverse=True)]
     for e in items:                                     # for the leakage audit
         tools.trace.used(agent, e["id"], e["published"])

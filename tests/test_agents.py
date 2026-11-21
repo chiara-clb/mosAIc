@@ -217,3 +217,12 @@ def test_tool_failures_go_to_the_fallback():
     s, run, _ = start(failures={"search_documents"})
     through(s, run, "coordinator", "quant", "research", "synthesis", "critic")
     assert s["verdict"]["route"] == "fallback"
+
+
+def test_one_passage_per_filing_reaches_the_evidence():
+    from types import SimpleNamespace
+    full = {"A-0": {"chunk": {"filing": "0001-26-1"}}, "A-1": {"chunk": {"filing": "0001-26-1"}},
+            "B-0": {"chunk": {"filing": "0001-26-2"}}, "NEWS-0": {}, "F1": {}}
+    tools = SimpleNamespace(passage=lambda i: full.get(i))
+    items = [{"id": i} for i in ("A-1", "NEWS-0", "A-0", "B-0", "F1")]          # best first
+    assert [e["id"] for e in A.one_per_filing(items, tools)] == ["A-1", "NEWS-0", "B-0", "F1"]
