@@ -32,6 +32,22 @@ LangGraph runs the flow. Quant and research run at the same time, synthesis wait
 6. **Every check is code where possible.** Dates, quotes, arithmetic and tool permissions are checked in code, which is testable and cannot be talked out of a decision.
 7. **A human sees the risky cases only.** Reviewing every forecast is slow and reviewers stop reading carefully. The risk gate holds a forecast only when at least two warning signs appear (large shift, thin evidence, opposite readings scoring alike, low model confidence, a troubled run).
 
+## Results day
+
+A second LangGraph flow forecasts the next-day move minutes after an after-close results release (fall, flat or gain, with a large move set at half the typical results-day move). It reuses the tool interface, the risk gate and the analyst review.
+
+| Step | Code or agent | Job |
+| --- | --- | --- |
+| Coordinator | Code | Checks the request. The world is fixed 15 minutes after the release, with prices up to that day's close |
+| Quant | Code | Three baselines: one year of daily moves (B1), past results-day moves (B2), option prices at the close (B3) |
+| Fetch release | Code | Gets the press release through the tool interface, which applies the date rule |
+| Release reader | Agent (Claude, no tools) | Reads the release against the baselines and the analysts' consensus, and writes ledger lines with exact quotes |
+| Critic | Code | Checks every quote against the release, sends failures back with reasons, at most twice, then strikes the lines that still fail |
+| Finalise | Code | The ledger tilts B3 in small steps; strong lines count more than weak ones |
+| Risk gate | Code | Same warning signs, plus missing consensus. Publishes, flags or holds |
+
+Consensus values (metric, provider, value) are given to the reader. The providers' text and links are not. What happened the next day is added to the log only after the run, marked as never shown to the agents.
+
 ## How the design changed during the program
 
 | Module | Change | Why |
@@ -43,10 +59,11 @@ LangGraph runs the flow. Quant and research run at the same time, synthesis wait
 | 4 (tests) | Baseline version C, every recent filing becomes a candidate, price reaction and GDELT news added, same-story rule | The old baseline was fooled by results-day jumps, searches missed short filings, filings alone gave a partial view |
 | 5 | Five agents in LangGraph, checked JSON handoffs, critic sends work back with reasons, at most twice | Feedback without reasons did not converge |
 | 6 | Request check, risk gate with publish, flag or hold, analyst review with a feedback log | Make the guardrails and human oversight explicit |
+| 7 | Results-day graph: three baselines, a release reader agent, the same critic, risk gate and review | The evaluation showed news matters only when it is new |
 
 ## Known limits
 
 - Public filings may carry little information about the next month that the market has not already priced.
 - With small models, the agent rarely moves away from the baseline.
 - The language models used by the live system may remember 2025 and early 2026 events, so their evaluation uses dates after their knowledge cutoff.
-- A natural next step is to forecast right after results releases, where new information is richest, and compare calibration with the option-implied view before the release.
+- Results day has been run on three releases as a demonstration only. It still needs an evaluation on many releases, and an agent that writes an expectations brief before each release.
