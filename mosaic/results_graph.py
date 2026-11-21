@@ -347,3 +347,21 @@ def live_results_case(ticker: str, release_day, options_dir: str | None = None, 
     world = results_world(ticker.upper(), company or ticker.upper(), release, upto_t0,
                           [r for r in releases if r <= release], text, chain, consensus)
     return world, closes
+
+
+def after_lines(final: dict, actual: dict | None, baselines: dict | None = None) -> list[str]:
+    """What happened, and the chance each forecast gave it, for the end of the log."""
+    if not actual:
+        return ["What happened: not known yet (no close after the release day)."]
+    out = [f"What happened: {actual['move'] * 100:+.1f}% on {actual['day']}, a {actual['outcome']}."]
+    k = actual["outcome"]
+    for name in ("B1", "B2", "B3"):
+        p = (baselines or {}).get(name)
+        if p:
+            out.append(f"Chance {name} gave it: {p[k]:.1f}%")
+    if final.get("agent_probabilities"):
+        out.append(f"Chance MosAIc (agent) gave it: {final['agent_probabilities'][k]:.1f}%")
+        out.append(f"Chance MosAIc (after the analyst's review) gave it: {final['probabilities'][k]:.1f}%")
+    else:
+        out.append(f"Chance MosAIc gave it: {final['probabilities'][k]:.1f}%")
+    return out

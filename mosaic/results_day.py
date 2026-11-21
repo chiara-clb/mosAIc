@@ -255,7 +255,7 @@ def main(argv=None) -> int:                                        # pragma: no 
         from mosaic.results_graph import live_results_case, run_results_day
         from mosaic.views import progress_line, text_log
         print("\nRunning the results-day agents:")
-        world, _ = live_results_case(rd.ticker, rd.t0, a.options_dir, a.consensus_dir)
+        world, closes_all = live_results_case(rd.ticker, rd.t0, a.options_dir, a.consensus_dir)
         state, run = run_results_day(world, make_model("anthropic", model_name=a.model),
                                      on_event=lambda e: (line := progress_line(e)) and print(line))
         final = state["final"]
@@ -267,7 +267,12 @@ def main(argv=None) -> int:                                        # pragma: no 
         print("MosAIc:", final["probabilities"], "  (B3:", final["baseline"], ")")
         out = Path("runs") / run.tools.trace.run_id
         out.mkdir(parents=True, exist_ok=True)
-        (out / "log.txt").write_text(text_log(state, run), encoding="utf-8")
+        from mosaic.results_graph import actual_move, after_lines
+        actual = actual_move(closes_all, rd.t0, state["baseline"]["tau"]) if state.get("baseline") else None
+        after = after_lines(final, actual, state.get("baseline"))
+        for line in after:
+            print(line)
+        (out / "log.txt").write_text(text_log(state, run, after=after), encoding="utf-8")
         run.tools.trace.write_jsonl(out / "trace.jsonl")
         print(f"Full log and trace: {out}/")
     return 0

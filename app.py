@@ -267,7 +267,8 @@ if mode.startswith("Results"):
     with tabs["Tool calls"]:
         plain_table(tool_rows(rrun))
     with tabs["Full log"]:
-        log = text_log(rstate, rrun, rfinal)
+        from mosaic.results_graph import after_lines
+        log = text_log(rstate, rrun, rfinal, after_lines(rfinal, actual, base))
         st.download_button("Download log", log, file_name=f"{rrun.tools.trace.run_id}.log.txt")
         st.code(log, language=None)
     st.stop()

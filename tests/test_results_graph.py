@@ -117,3 +117,13 @@ def test_what_happened_is_measured_from_the_release_close_to_the_next():
     a = actual_move(closes, T0, 0.04)
     assert a["day"] == date(2026, 7, 31) and a["outcome"] in ("gain", "fall")
     assert actual_move(closes.loc[:pd.Timestamp(T0)], T0, 0.04) is None        # not known yet
+
+
+def test_the_log_ends_with_what_happened_marked_as_after_the_run():
+    from mosaic.results_graph import actual_move, after_lines
+    state, run = run_results_day(world(), scripted(good()))
+    actual = actual_move(synthetic_prices(PAST + [T0]), T0, state["baseline"]["tau"])
+    log = text_log(state, run, after=after_lines(state["final"], actual, state["baseline"]))
+    tail = log.split("AFTER THE RUN (never shown to the agents)")[1]
+    assert "What happened: " in tail and "Chance B3 gave it" in tail and "Chance MosAIc gave it" in tail
+    assert log.index("AFTER THE RUN") > log.index("EVENTS")

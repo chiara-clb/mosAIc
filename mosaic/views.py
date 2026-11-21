@@ -136,7 +136,7 @@ def _table(rows: list[dict]) -> list[str]:
     return ["  " + " | ".join(f"{k}: {v}" for k, v in r.items()) for r in rows]
 
 
-def text_log(state: dict, run, final: dict | None = None) -> str:
+def text_log(state: dict, run, final: dict | None = None, after: list[str] | None = None) -> str:
     """The whole run as plain text, to copy and paste: result, ledger, evidence, Tree of Thought, every event.
 
     `final`: the analyst-reviewed forecast, if there is one.
@@ -169,4 +169,6 @@ def text_log(state: dict, run, final: dict | None = None) -> str:
             out.append(f"   {STEP_NAMES.get(e['node'], e['node'])} used {e.get('source')} (published {e.get('published')})")
     if state.get("error"):
         out += ["", "ERRORS"] + ["  " + str(x) for x in state["error"]]
+    if after:
+        out += ["", "AFTER THE RUN (never shown to the agents)"] + ["  " + line for line in after]
     return "\n".join(out) + "\n"
