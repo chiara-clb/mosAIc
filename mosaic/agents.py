@@ -29,7 +29,11 @@ class Run:
     options: dict = field(default_factory=lambda: {"protocol": "two_way", "readings": "tot"})
 
     def ask(self, agent: str, task: str, payload: dict, max_tokens: int = 300) -> dict | None:
-        return parse_json(self.model(agent_messages(agent, task, payload, self.tools.extra_roles), max_tokens))
+        raw = self.model(agent_messages(agent, task, payload, self.tools.extra_roles), max_tokens)
+        parsed = parse_json(raw)
+        self.tools.trace.add(agent, "model_call", task=task[:70], max_tokens=max_tokens,
+                             reply=str(raw)[:3000], parsed=parsed is not None)
+        return parsed
 
 
 AMBIGUITY_GAP = 0.05          # best two ledgers point opposite ways and score this close
