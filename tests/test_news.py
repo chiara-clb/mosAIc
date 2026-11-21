@@ -139,3 +139,21 @@ def test_a_broken_cache_file_is_treated_as_empty(tmp_path):
     f = tmp_path / "cache.json"
     f.write_text('{"half written')
     assert Gdelt(f, http_get=lambda p: {"ok": 1}, spacing=0)({"q": 1}) == {"ok": 1}
+
+
+def test_refusals_and_waits_are_reported_live(tmp_path):
+    said, calls = [], []
+
+    def refuse_once(params):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("429 Too Many Requests")
+        return {"articles": []}
+
+    g = Gdelt(tmp_path / "c.json", http_get=refuse_once, spacing=0)
+    g.fetch("Intel Corporation", "INTC", AS_OF, progress=said.append)
+    assert said[0].startswith("News: ") and said[0].endswith("downloading)")
+    assert said[1].startswith("   GDELT refused (RuntimeError: 429") and "attempt 2 of 4" in said[1]
+    said.clear()
+    g.fetch("Intel Corporation", "INTC", AS_OF, progress=said.append)
+    assert all(s.endswith("saved)") for s in said)                       # second time, all from the cache

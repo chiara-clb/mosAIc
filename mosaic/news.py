@@ -117,6 +117,7 @@ class Gdelt:
         self.spacing = SETTINGS.gdelt_spacing_seconds if spacing is None else spacing
         self.retries = retries
         self.errors: list[str] = []          # failed calls in this session, so a run can say news was missing
+        self.progress = None                  # optional callable(message), told about refusals and waits
         self._last = 0.0
 
     def _load(self) -> dict:
@@ -154,6 +155,9 @@ class Gdelt:
         for attempt in range(self.retries + 1):
             # After a refusal GDELT wants a real pause: 5 s, then 30 s, 90 s, 180 s with the defaults.
             wait = (self.spacing if attempt == 0 else self.spacing * 6 * 3 ** (attempt - 1)) - (time.time() - self._last)
+            if attempt and self.progress:
+                self.progress(f"   GDELT refused ({error[:60]}); waiting {max(wait, 0):.0f} s, "
+                              f"attempt {attempt + 1} of {self.retries + 1}")
             if wait > 0:
                 time.sleep(wait)
             self._last = time.time()
@@ -166,6 +170,8 @@ class Gdelt:
             self._save()
             return payload
         self.errors.append(f"{params.get('mode')}: {error}")
+        if self.progress:
+            self.progress("   Skipped: GDELT kept refusing. A later run will try this day again.")
         print(f"Warning: GDELT news could not be fetched ({error}). The forecast will have no news.", file=sys.stderr)
         return {}
 
@@ -179,11 +185,14 @@ class Gdelt:
         q, fmt = news_query(company, ticker), "%Y%m%d%H%M%S"
         articles, seen_urls = [], set()
         days = news_days(as_of)
+        self.progress = progress
         for n, (start, end) in enumerate(days, 1):
+            params = {"query": q, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
+                      "startdatetime": start.strftime(fmt), "enddatetime": end.strftime(fmt)}
             if progress:
-                progress(f"News: {start:%d %b} ({n} of {len(days)} days)")
-            day = self({"query": q, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
-                        "startdatetime": start.strftime(fmt), "enddatetime": end.strftime(fmt)})
+                saved = json.dumps(params, sort_keys=True) in self.cache
+                progress(f"News: {start:%d %b} ({n} of {len(days)} days, {'saved' if saved else 'downloading'})")
+            day = self(params)
             for a in (day or {}).get("articles", []):
                 key = (a.get("url"), a.get("title"), a.get("seendate"))       # the same article returned twice
                 if key not in seen_urls:

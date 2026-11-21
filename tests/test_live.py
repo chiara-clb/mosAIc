@@ -118,5 +118,5 @@ def test_live_world_reports_each_stage(tmp_path):
                price_fetch=price_fetch, cache_dir=tmp_path / "px", progress=said.append)
     assert said[0] == "Listing SEC filings"
     assert any(s.startswith("Indexing") for s in said)
-    assert sum(s.startswith("News: ") and "days)" in s for s in said) == 14
+    assert sum(s.startswith("News: ") and "days, downloading)" in s for s in said) == 14
     assert said[-1].startswith("News: ") and said[-1].endswith("stories found")
