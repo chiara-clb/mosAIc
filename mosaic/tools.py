@@ -137,14 +137,16 @@ class ToolBox:
                              "header": header + (" | instruction-like text removed" if removed else "")})
         return sorted(hits, key=lambda h: -h["score"])[:k]
 
-    def search_news(self, query: str, k: int = SETTINGS.k_final, days: int = SETTINGS.news_days) -> list[dict]:
+    def search_news(self, query: str, k: int = SETTINGS.k_final, days: int = SETTINGS.news_days,
+                    list_all: bool = False) -> list[dict]:
+        """Stories matching the query; with list_all, every story in the window (the code's safety net)."""
         since = self.as_of - timedelta(days=days)
         hits = []
         for s in self.world.news:
             if not self.visible(s, since):
                 continue
             text = " | ".join(s["headlines"])
-            score = similarity(query, text)
+            score = similarity(query, text) if not list_all else SETTINGS.min_score
             if score >= SETTINGS.min_score:
                 hits.append({"id": s["id"], "kind": "news", "score": round(score, 3), "extract": clean_extract(text)[0],
                              "header": f"News | {len(s['headlines'])} articles | first seen "

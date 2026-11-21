@@ -56,8 +56,8 @@ def build_server(world: World, name: str = "mosaic-tools") -> MCPServer:
         return _dump(box.search_documents(query, k=k, list_all=list_all))
 
     @server.tool(description="News stories first seen in the 14 days before the forecast date that match the query.")
-    def search_news(query: str, k: int = 5, days: int = 14) -> str:
-        return _dump(box.search_news(query, k=k, days=days))
+    def search_news(query: str, k: int = 5, days: int = 14, list_all: bool = False) -> str:
+        return _dump(box.search_news(query, k=k, days=days, list_all=list_all))
 
     @server.tool(description="How often past events of this type (and price reaction) were followed by each kind of move.")
     def case_memory(event: str, reaction: str | None = None, lag_days: int | None = None) -> str:

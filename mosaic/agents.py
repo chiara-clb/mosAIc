@@ -169,6 +169,15 @@ def research(state: dict, run: Run, agent: str = "research", full_text: bool = F
         notes.append(f"no filing search by the model; code listed {len(hits)} recent filings")
         for h in hits:
             pool.setdefault(h["id"], _evidence_item(h, tools.passage(h["id"]), req["as_of"]))
+    if not any(e["kind"] == "news" for e in pool.values()) and not state.get("evidence"):
+        try:                                            # safety net: the model's news searches found nothing
+            hits = tools.call("search_news", agent, query="", list_all=True)
+        except ToolError:
+            hits = []
+        if hits:
+            notes.append(f"no news found by the model's searches; code listed {len(hits)} recent stories")
+        for h in hits:
+            pool.setdefault(h["id"], _evidence_item(h, tools.passage(h["id"]), req["as_of"]))
     items = same_story(one_per_filing(sorted(pool.values(), key=lambda e: -e["score"]), tools, req["as_of"]),
                        req["company"])
     items = items[:SETTINGS.k_final]

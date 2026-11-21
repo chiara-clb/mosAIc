@@ -248,3 +248,12 @@ def test_the_kept_passage_is_the_filings_own_subject_not_an_exhibit_list():
 
 def test_the_quote_check_asks_about_grounding_not_the_forecast():
     assert "grounding only" in A.JUDGE_TASK and "Do not judge" in A.JUDGE_TASK
+
+
+def test_news_can_be_listed_without_a_matching_query():
+    s, run, _ = start()
+    tools = run.tools
+    assert tools.search_news("zzz unrelated words") == []
+    listed = tools.search_news("", list_all=True)
+    assert listed and all(h["kind"] == "news" for h in listed)
+    assert all(tools.passage(h["id"]) is not None for h in listed)          # nothing after the forecast date
