@@ -70,7 +70,8 @@ def test_one_agent_per_role_card_and_no_tools_on_the_crewai_side():
 
 def test_claude_model_names_get_the_provider_prefix():
     llm = crew_llm("claude-haiku-5-5", fake_crewai())
-    assert llm.model == "anthropic/claude-haiku-5-5" and llm.kw["temperature"] == 0.0
+    assert llm.model == "anthropic/claude-haiku-5-5" and "temperature" not in llm.kw
+    assert llm.kw["thinking"] == {"type": "disabled"}
     assert crew_llm("anthropic/claude-sonnet-5-5", fake_crewai()).model == "anthropic/claude-sonnet-5-5"
 
 

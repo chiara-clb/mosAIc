@@ -158,27 +158,45 @@ def scripted_chat(script: dict | None = None) -> Chat:
 
 # --- real models -------------------------------------------------------------------------------
 
+NEW_CLAUDE = re.compile(r"claude-(opus|sonnet|haiku|fable|mythos)-5")
+
+
 def anthropic_chat(model: str | None = None, client=None, temperature: float | None = None) -> Chat:
-    """Claude through the Anthropic API. `client` can be passed in for tests."""
+    """Claude through the Anthropic API. `client` can be passed in for tests.
+
+    Claude 5 models think by default, the hidden thinking counts toward max_tokens, and they refuse
+    `temperature`. Each agent step here is a short, structured answer that code then checks, so
+    thinking is turned off and no temperature is sent. If a reply still comes back empty because
+    the limit was reached, it is asked again once with four times the limit.
+    """
     if client is None:
         import anthropic                                   # optional dependency
         client = anthropic.Anthropic()
     model = model or SETTINGS.llm_model
-    temperature = SETTINGS.llm_temperature if temperature is None else temperature
-    sampling = {"temperature": temperature}
+    extra: dict = {}
+    if NEW_CLAUDE.search(model):
+        extra["extra_body"] = {"thinking": {"type": "disabled"}}
+    else:
+        extra["temperature"] = SETTINGS.llm_temperature if temperature is None else temperature
+
+    def create(**kw):
+        try:
+            return client.messages.create(**kw, **extra)
+        except TypeError as e:                             # an older or newer package without these options
+            if not extra or not any(k in str(e) for k in extra):
+                raise
+            extra.clear()
+            return client.messages.create(**kw)
 
     def chat(messages: list[dict], max_tokens: int = 300) -> str:
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         rest = [m for m in messages if m["role"] != "system"]
-        try:
-            r = client.messages.create(model=model, system=system, messages=rest, max_tokens=max_tokens, **sampling)
-        except TypeError as e:
-            # Newer versions of the anthropic package no longer take a temperature; the model's default is used.
-            if "temperature" not in str(e) or not sampling:
-                raise
-            sampling.clear()
-            r = client.messages.create(model=model, system=system, messages=rest, max_tokens=max_tokens)
-        return "".join(getattr(b, "text", "") for b in r.content).strip()
+        r = create(model=model, system=system, messages=rest, max_tokens=max_tokens)
+        text = "".join(getattr(b, "text", "") for b in r.content).strip()
+        if getattr(r, "stop_reason", None) == "max_tokens" and parse_json(text) is None:
+            r = create(model=model, system=system, messages=rest, max_tokens=4 * max_tokens)
+            text = "".join(getattr(b, "text", "") for b in r.content).strip()
+        return text
     return chat
 
 

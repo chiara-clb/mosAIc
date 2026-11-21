@@ -82,7 +82,8 @@ def test_anthropic_backend_sends_system_separately():
     chat = anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=FakeMessages()))
     out = chat(agent_messages("critic", "Check.", {"q": 1}), 50)
     assert out == '{"ok": true}'
-    assert sent["model"] == "claude-haiku-5-5" and sent["max_tokens"] == 50 and sent["temperature"] == 0.0
+    assert sent["model"] == "claude-haiku-5-5" and sent["max_tokens"] == 50
+    assert "temperature" not in sent and sent["extra_body"] == {"thinking": {"type": "disabled"}}
     assert sent["system"].startswith("Agent: critic") and [m["role"] for m in sent["messages"]] == ["user"]
 
 
@@ -105,3 +106,29 @@ def test_anthropic_chat_works_with_a_package_that_has_no_temperature():
     assert chat([{"role": "user", "content": "hi"}]) == "ok"
     assert chat([{"role": "user", "content": "hi"}]) == "ok"
     assert len(seen) == 2
+
+
+def test_older_claude_models_keep_a_temperature():
+    sent = {}
+
+    class FakeMessages:
+        def create(self, **kw):
+            sent.update(kw)
+            return SimpleNamespace(content=[SimpleNamespace(text="{}")])
+
+    anthropic_chat("claude-3-5-haiku-latest", client=SimpleNamespace(messages=FakeMessages()))([{"role": "user", "content": "x"}])
+    assert sent["temperature"] == 0.0 and "extra_body" not in sent
+
+
+def test_a_reply_cut_off_by_the_limit_is_asked_again_with_more_room():
+    limits = []
+
+    class Thinker:
+        def create(self, **kw):
+            limits.append(kw["max_tokens"])
+            if len(limits) == 1:          # all the room went on hidden thinking
+                return SimpleNamespace(content=[SimpleNamespace(type="thinking")], stop_reason="max_tokens")
+            return SimpleNamespace(content=[SimpleNamespace(text='{"readings": []}')], stop_reason="end_turn")
+
+    out = anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=Thinker()))([{"role": "user", "content": "x"}], 400)
+    assert out == '{"readings": []}' and limits == [400, 1600]

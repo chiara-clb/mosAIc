@@ -40,6 +40,9 @@ def crew_llm(model_name: str | None = None, crewai=None, temperature: float | No
     name = model_name or SETTINGS.llm_model
     if "/" not in name:
         name = f"anthropic/{name}"
+    from mosaic.llm import NEW_CLAUDE
+    if NEW_CLAUDE.search(name):       # Claude 5: no temperature, and thinking off so it does not eat max_tokens
+        return crewai.LLM(model=name, max_tokens=max_tokens, thinking={"type": "disabled"})
     t = SETTINGS.llm_temperature if temperature is None else temperature
     return crewai.LLM(model=name, temperature=t, max_tokens=max_tokens)
 
