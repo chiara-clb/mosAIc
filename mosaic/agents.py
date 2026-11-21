@@ -18,7 +18,7 @@ from mosaic.config import OUTCOMES, SETTINGS
 from mosaic.handoffs import handoff, problems_baseline, problems_reading
 from mosaic.ledger import apply_ledger, direction, floor_and_normalise, shift_for, total_shift
 from mosaic.llm import Model, agent_messages, parse_json
-from mosaic.tools import RoleError, ToolBox, ToolError, similarity, words
+from mosaic.tools import RoleError, ToolBox, ToolError, clean_extract, similarity, words
 from mosaic.world import published
 
 
@@ -101,16 +101,32 @@ def _evidence_item(hit: dict, full: dict, as_of) -> dict:
             "event": full["event"], "reaction": full["reaction"], "novelty": full["novelty"]}
 
 
-def one_per_filing(items: list[dict], tools: ToolBox) -> list[dict]:
-    """Keep only the best-scored passage of each filing (items come best first), so one filing cannot
-    fill several evidence slots and be counted several times."""
+def one_per_filing(items: list[dict], tools: ToolBox, as_of=None) -> list[dict]:
+    """Keep one passage per filing (items come best first), so one filing cannot fill several evidence
+    slots and be counted several times.
+
+    The passage kept is the one about the filing's own subject (for an 8-K, its item; for a report, results
+    and outlook), chosen in code by the document index, not whichever passage matched the search best,
+    which can be an exhibit list. Without an index (the demo company) the best-scored passage is kept.
+    """
+    index = tools.world.extra.get("index") if as_of else None
+    reps = {}
+    if index is not None:
+        since = as_of - timedelta(days=SETTINGS.fresh_days)
+        reps = {c["filing"]: c for c in index.filing_candidates(tools.world.ticker, as_of, since)}
     seen, out = set(), []
     for e in items:
         full = tools.passage(e["id"]) or {}
         key = (full.get("chunk") or {}).get("filing") or e["id"]       # live filings share an accession number
-        if key not in seen:
-            seen.add(key)
-            out.append(e)
+        if key in seen:
+            continue
+        seen.add(key)
+        rep = reps.get(key)
+        if rep is not None and rep["id"] != e["id"] and tools.passage(rep["id"]) is not None:
+            hit = {"id": rep["id"], "kind": "filing", "score": e["score"], "header": rep["header"],
+                   "extract": clean_extract(rep["text"])[0]}
+            e = _evidence_item(hit, tools.passage(rep["id"]), as_of)
+        out.append(e)
     return out
 
 
@@ -153,7 +169,8 @@ def research(state: dict, run: Run, agent: str = "research", full_text: bool = F
         notes.append(f"no filing search by the model; code listed {len(hits)} recent filings")
         for h in hits:
             pool.setdefault(h["id"], _evidence_item(h, tools.passage(h["id"]), req["as_of"]))
-    items = same_story(one_per_filing(sorted(pool.values(), key=lambda e: -e["score"]), tools), req["company"])
+    items = same_story(one_per_filing(sorted(pool.values(), key=lambda e: -e["score"]), tools, req["as_of"]),
+                       req["company"])
     items = items[:SETTINGS.k_final]
     items = [handoff("evidence", e) for e in sorted(items, key=lambda e: e["published"], reverse=True)]
     for e in items:                                     # for the leakage audit

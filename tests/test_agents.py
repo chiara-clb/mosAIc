@@ -226,3 +226,21 @@ def test_one_passage_per_filing_reaches_the_evidence():
     tools = SimpleNamespace(passage=lambda i: full.get(i))
     items = [{"id": i} for i in ("A-1", "NEWS-0", "A-0", "B-0", "F1")]          # best first
     assert [e["id"] for e in A.one_per_filing(items, tools)] == ["A-1", "NEWS-0", "B-0", "F1"]
+
+
+def test_the_kept_passage_is_the_filings_own_subject_not_an_exhibit_list():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    when = datetime(2026, 7, 9, 20, 46, tzinfo=timezone.utc)
+
+    def item(i, text):
+        return {"id": i, "text": text, "filed": when, "event": "8-K 8.01", "reaction": "fall", "novelty": 1.0,
+                "chunk": {"filing": "0001-26-1"}}
+    full = {"A-4": item("A-4", "Item 9.01 Exhibits. 4.1 Form of Note."),
+            "A-0": item("A-0", "Item 8.01 Other Events. Amazon closed the sale of $24.9 billion of notes.")}
+    index = SimpleNamespace(filing_candidates=lambda t, before, since: [
+        {"filing": "0001-26-1", "id": "A-0", "header": "8-K | Item 8.01", "text": full["A-0"]["text"]}])
+    tools = SimpleNamespace(world=SimpleNamespace(extra={"index": index}, ticker="AMZN"), passage=lambda i: full.get(i))
+    items = [{"id": "A-4", "score": 0.6, "kind": "filing", "header": "8-K | Item 9.01", "extract": "Exhibits"}]
+    kept = A.one_per_filing(items, tools, datetime(2026, 7, 30, tzinfo=timezone.utc))
+    assert [e["id"] for e in kept] == ["A-0"] and "24.9 billion" in kept[0]["full_text"]
