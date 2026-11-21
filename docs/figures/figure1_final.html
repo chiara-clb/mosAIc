@@ -1,0 +1,70 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+:root{--ink:#1d2433;--soft:#5a6475;--line:#3d4452;--agent:#fdf0dc;--agentb:#c47f17;--tool:#eef2f9;--toolb:#4b6a9b;--red:#b03a2e}
+body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:var(--ink)}
+#fig{width:1200px;padding:20px;box-sizing:border-box}
+.lanes{display:flex;gap:20px}
+.lane{flex:1;border:1.5px solid #c9ced8;border-radius:12px;padding:14px 16px 16px;display:flex;flex-direction:column;align-items:center}
+h2{font-size:22px;margin:0 0 4px;text-align:center}
+.sub{font-size:17px;color:var(--soft);margin-bottom:12px;text-align:center}
+.box{width:100%;box-sizing:border-box;border:2px solid var(--line);border-radius:9px;padding:9px 12px;text-align:center;background:#fff;font-size:18px;line-height:1.3}
+.box b{font-size:20px}
+.agent{background:var(--agent);border-color:var(--agentb)}
+.human{border-style:dashed}
+.pair{display:flex;gap:10px;width:100%}.pair .box{flex:1}
+.down{width:2px;height:22px;background:var(--line);position:relative;margin:0 0 9px}
+.down:after{content:"";position:absolute;left:-6px;bottom:-9px;border-top:10px solid var(--line);border-left:7px solid transparent;border-right:7px solid transparent}
+.loop{font-size:16px;color:var(--red);text-align:center;margin:2px 0 6px}
+.tools{margin-top:18px;border:2px dashed var(--toolb);border-radius:12px;padding:12px;background:#fafcff}
+.tools .head{font-size:18px;text-align:center;margin-bottom:10px}
+.tgrid{display:flex;gap:10px}
+.tool{flex:1;background:var(--tool);border:1.5px solid var(--toolb);border-radius:8px;padding:8px;text-align:center;font-size:16px;line-height:1.25}
+.tool b{display:block;font-size:17px}
+.eval{margin-top:14px;border:2px dashed #999;border-radius:12px;background:#f3f3f3;padding:10px 14px;font-size:17px;line-height:1.35}
+.legend{display:flex;gap:26px;font-size:17px;color:var(--soft);margin-top:12px;justify-content:center}
+.sw{display:inline-block;width:22px;height:15px;border-radius:4px;vertical-align:middle;margin-right:7px}
+</style></head><body><div id="fig">
+<div class="lanes">
+<div class="lane">
+ <h2>Monthly forecast</h2>
+ <div class="sub">large fall, flat or large gain over 21 trading days</div>
+ <div class="box"><b>Coordinator</b><br>checks the request and whether results are due</div><div class="down"></div>
+ <div class="pair">
+  <div class="box"><b>Quant</b><br>baseline from one year of prices</div>
+  <div class="box agent"><b>Research</b><br>ReAct loop over filings and news, short cleaned extracts</div>
+ </div><div class="down"></div>
+ <div class="box agent"><b>Synthesis</b><br>Tree of Thought: four readings per item, scored by base rate and novelty</div><div class="down"></div>
+ <div class="box"><b>Critic</b><br>quotes, dates, arithmetic</div>
+ <div class="loop">fails → back with reasons, at most twice, then the baseline</div>
+ <div class="box"><b>Risk gate</b><br>warning signs → publish, flag or hold</div><div class="down"></div>
+ <div class="box human"><b>Analyst</b><br>keeps, resizes or strikes each line</div>
+</div>
+<div class="lane">
+ <h2>Results day</h2>
+ <div class="sub">next-day move, minutes after an after-close release</div>
+ <div class="box"><b>Coordinator</b><br>fixes the time at release + 15 minutes</div><div class="down"></div>
+ <div class="pair">
+  <div class="box"><b>Quant</b><br>B1 daily moves, B2 past results days, B3 options at the close</div>
+  <div class="box"><b>Fetch release</b><br>press release and consensus values</div>
+ </div><div class="down"></div>
+ <div class="box agent"><b>Release reader</b><br>no tools; compares the release with consensus, writes quoted lines</div><div class="down"></div>
+ <div class="box"><b>Critic</b><br>every quote is in the release; the ledger then shifts B3</div>
+ <div class="loop">fails → back with reasons, at most twice, then the line is struck</div>
+ <div class="box"><b>Risk gate</b><br>same signs plus missing consensus</div><div class="down"></div>
+ <div class="box human"><b>Analyst</b><br>keeps, resizes or strikes each line</div>
+</div>
+</div>
+<div class="tools">
+ <div class="head"><b>One tool door, also an MCP server:</b> checks the caller's role, returns only data published before the forecast time, logs every call</div>
+ <div class="tgrid">
+  <div class="tool"><b>Market data</b>prices, results dates</div>
+  <div class="tool"><b>Filings</b>SEC EDGAR, 30 days</div>
+  <div class="tool"><b>News</b>GDELT headlines</div>
+  <div class="tool"><b>Case memory</b>past events</div>
+  <div class="tool"><b>Consensus</b>values only</div>
+ </div>
+</div>
+<div class="eval"><b>Never shown to the agents:</b> option prices on the forecast date, used as the monthly answer key, and the next-day move, added to the log after the run.</div>
+<div class="legend"><span><span class="sw" style="background:var(--agent);border:2px solid var(--agentb)"></span>uses Claude</span><span><span class="sw" style="background:#fff;border:2px solid var(--line)"></span>code</span><span><span class="sw" style="background:#fff;border:2px dashed var(--line)"></span>human</span><span>Both flows run in LangGraph; side-by-side boxes run in parallel.</span></div>
+</div></body></html>

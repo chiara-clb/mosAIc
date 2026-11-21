@@ -14,7 +14,7 @@ An equity analyst who wants a quick, checkable view of a stock before results or
 
 ## How a forecast is made
 
-![MosAIc architecture](docs/figures/design_proposed.png)
+![MosAIc architecture: the monthly forecast and results day](docs/figures/figure1_final.png)
 
 1. **Coordinator** checks whether results are due within the month.
 2. **Quant agent** calculates the baseline from one year of prices. This is plain code.
