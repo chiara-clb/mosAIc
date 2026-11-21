@@ -101,3 +101,11 @@ def test_the_analyst_review_shows_the_agent_next_to_the_analyst():
     rows = ledger_rows(state, reviewed)
     assert [r["Analyst decision"] for r in rows] == ["struck", "resized to weak"]
     assert "REVIEWED BY THE ANALYST" in text_log(state, run, reviewed)
+
+
+def test_every_field_a_node_writes_is_declared_in_the_state():
+    """LangGraph keeps only declared fields; the built-in runner keeps all, so check it here."""
+    import mosaic.results_graph as G
+    state, _ = run_results_day(world(), scripted(good()))
+    declared = set(G.ResultsState.__annotations__)
+    assert set(state) <= declared | {"verdict"} and "verdict" in declared

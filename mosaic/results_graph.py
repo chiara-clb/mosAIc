@@ -66,6 +66,7 @@ class ResultsState(TypedDict, total=False):
     release_text: str
     consensus: list
     reply: dict
+    verdict: str
     ledger: list
     feedback: list
     retries: int
