@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -108,35 +109,50 @@ class Gdelt:
     """GDELT DOC API calls, cached on disk and spaced 5 seconds apart, as GDELT asks."""
 
     def __init__(self, cache_file: str | Path | None = None, http_get: Callable[[dict], dict] | None = None,
-                 spacing: float | None = None):
+                 spacing: float | None = None, retries: int = 2):
         self.cache_file = Path(cache_file or Path(SETTINGS.data_dir) / "gdelt_cache.json")
         self.cache = json.loads(self.cache_file.read_text()) if self.cache_file.exists() else {}
         self.http_get = http_get or self._requests_get
         self.spacing = SETTINGS.gdelt_spacing_seconds if spacing is None else spacing
+        self.retries = retries
+        self.errors: list[str] = []          # failed calls in this session, so a run can say news was missing
         self._last = 0.0
 
     @staticmethod
     def _requests_get(params: dict) -> dict:                 # pragma: no cover - needs internet
         import requests
         r = requests.get(GDELT_URL, params=params, timeout=60)
-        return r.json() if r.text.strip().startswith("{") else {}
+        r.raise_for_status()
+        text = r.text.strip()
+        if not text:
+            return {}                                        # GDELT's answer when nothing matches
+        if not text.startswith("{"):
+            raise RuntimeError(f"GDELT did not return data: {text[:120]}")   # e.g. "Please limit requests..."
+        return r.json()
 
     def __call__(self, params: dict) -> dict:
+        """One GDELT call. Answers are cached on disk; failures are not, so the next run tries again."""
         key = json.dumps(params, sort_keys=True)
         if key in self.cache:
             return self.cache[key]
-        wait = self.spacing - (time.time() - self._last)
-        if wait > 0:
-            time.sleep(wait)
-        self._last = time.time()
-        try:
-            payload = self.http_get(params)
-        except Exception:
-            payload = {}
-        self.cache[key] = payload
-        self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-        self.cache_file.write_text(json.dumps(self.cache))
-        return payload
+        error = ""
+        for attempt in range(self.retries + 1):
+            wait = self.spacing * (1 + 2 * attempt) - (time.time() - self._last)
+            if wait > 0:
+                time.sleep(wait)
+            self._last = time.time()
+            try:
+                payload = self.http_get(params)
+            except Exception as e:                           # network error or a refusal
+                error = f"{type(e).__name__}: {e}"
+                continue
+            self.cache[key] = payload
+            self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+            self.cache_file.write_text(json.dumps(self.cache))
+            return payload
+        self.errors.append(f"{params.get('mode')}: {error}")
+        print(f"Warning: GDELT news could not be fetched ({error}). The forecast will have no news.", file=sys.stderr)
+        return {}
 
     def fetch(self, company: str, ticker: str, as_of: datetime) -> tuple[dict, dict]:
         q, fmt = news_query(company, ticker), "%Y%m%d%H%M%S"

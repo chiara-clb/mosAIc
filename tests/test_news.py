@@ -68,3 +68,36 @@ def test_gdelt_calls_are_cached(tmp_path):
     assert len(items) == 1 and items[0]["event"] == "news" and items[0]["first_seen"] < AS_OF
     Gdelt(tmp_path / "cache.json", http_get=http, spacing=0).fetch("Intel Corporation", "INTC", AS_OF)
     assert calls == ["artlist", "timelinetone"]                       # the second run used the cache
+
+
+def test_a_refused_gdelt_call_is_retried_and_not_cached(tmp_path, capsys):
+    calls = []
+
+    def refuse_then_answer(params):
+        calls.append(params["mode"])
+        if len(calls) == 1:
+            raise RuntimeError("GDELT did not return data: Please limit requests to one every 5 seconds")
+        return ARTICLES if params["mode"] == "artlist" else {"timeline": []}
+
+    g = Gdelt(tmp_path / "cache.json", http_get=refuse_then_answer, spacing=0)
+    assert len(news_items("Intel Corporation", "INTC", AS_OF, g, embed)) == 1      # the retry worked
+    assert g.errors == []
+
+
+def test_a_gdelt_failure_is_reported_and_tried_again_next_run(tmp_path, capsys):
+    def down(params):
+        raise ConnectionError("no network")
+
+    g = Gdelt(tmp_path / "cache.json", http_get=down, spacing=0, retries=1)
+    assert news_items("Intel Corporation", "INTC", AS_OF, g, embed) == []
+    assert len(g.errors) == 2 and "no network" in g.errors[0]
+    assert "GDELT news could not be fetched" in capsys.readouterr().err
+
+    calls = []
+    def up(params):
+        calls.append(params["mode"])
+        return ARTICLES if params["mode"] == "artlist" else {"timeline": []}
+
+    g2 = Gdelt(tmp_path / "cache.json", http_get=up, spacing=0)
+    assert len(news_items("Intel Corporation", "INTC", AS_OF, g2, embed)) == 1
+    assert calls == ["artlist", "timelinetone"]                    # the failure was not cached
