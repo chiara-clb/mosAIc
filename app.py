@@ -119,6 +119,7 @@ if mode.startswith("Results"):
                "Three baselines, all known before the release. No model is called.")
     if rd_go:
         st.session_state["reading"] = None
+        st.session_state["reader_error"] = None
         with st.spinner("Loading SEC results dates, prices and option quotes…"):
             try:
                 st.session_state["rd"] = load_live(rd_ticker, rd_day, rd_options or None)
@@ -188,9 +189,12 @@ if mode.startswith("Results"):
                 st.session_state["reading"] = read_release(text, rd.baselines, rd.tau, consensus,
                                                            make_model("anthropic", model_name=rd_model), rd.ticker)
                 st.session_state["consensus_n"] = len(consensus)
-            except Exception as exc:
-                st.error(f"The release reader could not run: {exc}")
+                st.session_state["reader_error"] = None
+            except Exception as exc:                              # kept for the next draw, so it stays on screen
+                st.session_state["reader_error"] = f"{type(exc).__name__}: {exc}"
         st.rerun()
+    if st.session_state.get("reader_error"):
+        st.error("The release reader could not run: " + st.session_state["reader_error"])
     if reading is not None:
         from mosaic.release_reader import ledger_rows as release_ledger
         n = st.session_state.get("consensus_n", 0)
