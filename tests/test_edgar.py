@@ -117,3 +117,21 @@ def test_sec_pages_are_saved_and_read_back(tmp_path):
         os.utime(f, (old, old))
     assert g(doc).json() == {"n": 1}                 # filed documents never change
     assert g(lst).json() == {"n": 3}                 # the list of filings is fetched again
+
+
+def test_press_releases_are_found_by_type_when_the_file_name_does_not_say():
+    base = "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000099"
+    pages = {
+        base + "/index.json": json.dumps({"directory": {"item": [
+            {"name": "nvda-20260826.htm"}, {"name": "q2fy27pr.htm"}, {"name": "q2fy27cfocommentary.htm"}]}}),
+        base + "/0001045810-26-000099-index.htm":
+            "<table><tr><th>Seq</th><th>Description</th><th>Document</th><th>Type</th></tr>"
+            "<tr><td>1</td><td>8-K</td><td><a href='/Archives/edgar/data/1045810/000104581026000099/nvda-20260826.htm'>"
+            "nvda-20260826.htm</a></td><td>8-K</td></tr>"
+            "<tr><td>2</td><td>PRESS RELEASE</td><td><a href='/Archives/edgar/data/1045810/000104581026000099/"
+            "q2fy27pr.htm'>q2fy27pr.htm</a></td><td>EX-99.1</td></tr>"
+            "<tr><td>3</td><td>CFO COMMENTARY</td><td><a href='/Archives/edgar/data/1045810/000104581026000099/"
+            "q2fy27cfocommentary.htm'>q2fy27cfocommentary.htm</a></td><td>EX-99.2</td></tr></table>",
+    }
+    urls = edgar.exhibit_urls(1045810, "0001045810-26-000099", lambda u: Resp(pages[u]))
+    assert urls == [base + "/q2fy27pr.htm", base + "/q2fy27cfocommentary.htm"]

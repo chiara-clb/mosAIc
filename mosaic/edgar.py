@@ -105,10 +105,35 @@ def filing_base(cik: int, accession: str) -> str:
 
 
 def exhibit_urls(cik: int, accession: str, get) -> list[str]:
-    idx = get(filing_base(cik, accession) + "/index.json").json()
+    """The press-release exhibits (EX-99.x) of a filing.
+
+    Most companies name the file after the exhibit (ex99-1.htm). Some do not (Nvidia: q2fy27pr.htm), so when
+    no name says so, the exhibit types are read from the filing's index page.
+    """
+    base = filing_base(cik, accession)
+    idx = get(base + "/index.json").json()
     names = [it["name"] for it in idx["directory"]["item"]]
-    return [filing_base(cik, accession) + "/" + n for n in names
-            if re.search(r"ex-?99", n, re.I) and n.lower().endswith((".htm", ".html", ".txt"))]
+    by_name = [base + "/" + n for n in names
+               if re.search(r"ex-?99", n, re.I) and n.lower().endswith((".htm", ".html", ".txt"))]
+    return by_name or exhibits_by_type(base, accession, get)
+
+
+def exhibits_by_type(base: str, accession: str, get) -> list[str]:
+    """Documents whose type is EX-99.x in the filing's index page ({accession}-index.htm)."""
+    from bs4 import BeautifulSoup
+    try:
+        html = get(f"{base}/{accession}-index.htm").text
+    except Exception:
+        return []
+    out = []
+    for row in BeautifulSoup(html, "html.parser").find_all("tr"):
+        cells = [c.get_text(" ", strip=True) for c in row.find_all("td")]
+        link = row.find("a", href=True)
+        if link and any(re.fullmatch(r"EX-99(\.\d+)?", c, re.I) for c in cells):
+            name = link["href"].rsplit("/", 1)[-1]
+            if name.lower().endswith((".htm", ".html", ".txt")):
+                out.append(f"{base}/{name}")
+    return out
 
 
 # --- turning a document into chunks ------------------------------------------------------------
