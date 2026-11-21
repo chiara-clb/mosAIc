@@ -1,0 +1,66 @@
+"""Plain tables from a finished run, for the Streamlit app (and anything else that shows a forecast).
+
+Kept separate from the app so they can be tested without Streamlit.
+"""
+
+from __future__ import annotations
+
+from mosaic.config import OUTCOMES
+from mosaic.trace import leakage_audit
+
+LABELS = {"fall": "Large fall", "flat": "Flat", "gain": "Large gain"}
+
+
+def forecast_rows(final: dict) -> list[dict]:
+    """One row per outcome: baseline, forecast and the change in points."""
+    return [{"Outcome": LABELS[k], "Baseline %": round(final["baseline"][k], 1),
+             "Forecast %": round(final["probabilities"][k], 1),
+             "Change (points)": round(final["probabilities"][k] - final["baseline"][k], 1)} for k in OUTCOMES]
+
+
+def ledger_rows(state: dict, final: dict | None = None) -> list[dict]:
+    final = final or state["final"]
+    dates = {e["id"]: e["published"] for e in state.get("evidence") or []}
+    return [{"Source": x["source"], "Published": f"{dates[x['source']]:%Y-%m-%d}" if x["source"] in dates else "-",
+             "Effect": x["effect"], "Size": x["size"], "Quote": x["quote"], "Reason": x.get("reason", ""),
+             "Past cases": x.get("n")} for x in final["ledger"]]
+
+
+def evidence_rows(state: dict) -> list[dict]:
+    return [{"Id": e["id"], "Kind": e["kind"], "Published": f"{e['published']:%Y-%m-%d}", "Header": e["header"],
+             "Covered by news": ", ".join(c["id"] for c in e.get("coverage") or []),
+             "Novelty": round(e.get("novelty", 0), 2), "Price reaction": e.get("reaction") or "-"}
+            for e in state.get("evidence") or []]
+
+
+def tot_rows(state: dict) -> list[dict]:
+    """Every reading the Tree of Thought considered, with its scores, and which one was chosen."""
+    tot = state.get("tot") or {}
+    rows = []
+    for depth, p in enumerate(tot.get("prepared") or []):
+        chosen = tot["choice"][depth] if depth < len(tot.get("choice") or ()) else None
+        for i, r in enumerate(p["readings"]):
+            rows.append({"Item": p["item"], "Reading": r["effect"] + (f" {r['size']}" if r.get("size") else ""),
+                         "Quote check": "passed" if r["ok"] else "failed",
+                         "Base rate": round(r["base_rate"], 2), "Novelty": round(r["novelty"], 2),
+                         "Score": round(r["score"], 2), "Chosen": "yes" if i == chosen else ""})
+    return rows
+
+
+def step_rows(state: dict) -> list[dict]:
+    return [{"Step": t["node"], "Model calls": t["model_calls"], "Tool calls": t["tool_calls"], "Note": t["note"]}
+            for t in state.get("trace") or []]
+
+
+def tool_rows(run) -> list[dict]:
+    return [{"Agent": c["node"], "Tool": c["tool"], "Status": c["status"],
+             "Arguments": ", ".join(f"{k}={v}" for k, v in (c.get("args") or {}).items())} for c in run.tools.calls]
+
+
+def run_facts(state: dict, run) -> dict:
+    leaks = leakage_audit(run.tools.trace)
+    final = state["final"]
+    return {"status": final["status"], "review": final.get("review", "-"), "triggers": final.get("triggers") or [],
+            "why": final.get("why") or [], "retries": state.get("retries", 0), "model": run.model.name,
+            "model_calls": run.model.calls, "tool_calls": len(run.tools.calls),
+            "leakage": "clean" if not leaks else f"{len(leaks)} sources published too late"}
