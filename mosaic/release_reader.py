@@ -1,5 +1,9 @@
 """The release reader: an agent that reads the results press release and adjusts the option baseline.
 
+In the app and the command line it runs inside the results-day graph (mosaic/results_graph.py), with
+MosAIc's tool door, critic loop and risk gate. This module holds its role card, task, quote checks and
+the ledger rule; `read_release` is a single-step version of the same reading, kept for tests.
+
 The second half of the results-day view (mosaic.results_day computes the three baselines B1-B3).
 After an after-close release, the agent reads the press release (Exhibit 99.1 of the results 8-K)
 next to the baselines and the analysts' consensus estimates, and writes a ledger: for each factor,
