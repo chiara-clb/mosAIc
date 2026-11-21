@@ -107,14 +107,17 @@ What this shows:
 | | Alphabet (GOOGL) | Nvidia (NVDA) | Amazon (AMZN) |
 | --- | --- | --- | --- |
 | Options at the close (B3): fall / flat / gain | 38 / 27 / 36 | 40 / 26 / 34 | 40 / 23 / 37 |
-| MosAIc after the reader | 33 / 24 / 43 | 30 / 22 / 48 | 42 / 23 / 35 |
-| Risk gate | publish | flag (a 13-point shift) | flag (the critic sent a line back) |
-| What happened next day | to add | to add | gain (+14.3%) |
+| MosAIc after the reader | 36 / 21 / 44 | 30 / 21 / 49 | 42 / 23 / 35 |
+| Risk gate | publish | hold (a 15-point shift, and the critic sent a line back) | flag (the critic sent a line back) |
+| What happened next day | fall (−7.4%) | gain (+8.4%) | gain (+14.3%) |
+| Chance B3 gave it | 37.5% | 34.5% | 37% |
+| Chance MosAIc gave it | 35.9% | 49.1% | 35% |
 
 What this shows:
 
 - **The reader separated operating results from one-off items,** such as investment gains, and quoted the release for every line.
-- **The guardrails caught two problems.** On Amazon the critic found a quote that was not in the release and sent it back with the reason, and the corrected line passed. On Nvidia the risk gate flagged a large shift for the analyst.
+- **The guardrails caught problems.** On Nvidia and Amazon the critic found a quote that was not in the release and sent it back with the reason, and the corrected line passed. On Nvidia the risk gate also held the forecast for the analyst.
+- **One clear hit and two small misses.** On Nvidia MosAIc gave the gain a 49% chance against 35% from the options. On Alphabet and Amazon it gave what happened a slightly lower chance than the options.
 - **Correct quotes did not make a correct reading.** Amazon rose 14.3%, but the reader gave more weight to negative free cash flow than to the AWS beat and leaned slightly towards a fall. The critic checks quotes. It cannot check judgement.
 - **No data leaked.** The leakage audit was clean on all three runs, and the next-day move appears only in the log section marked as after the run.
 
