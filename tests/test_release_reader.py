@@ -67,11 +67,29 @@ def test_a_made_up_quote_goes_back_once_with_the_reason():
     assert "not in the release" in r.trace.events[1]["note"]
 
 
-def test_two_failures_report_the_options_baseline():
+def test_two_failures_strike_only_the_failing_lines():
     bad = good()
     bad["ledger"][0]["citation"] = "the stock will triple"
     r = read_release(RELEASE, BASE, 0.032, CONSENSUS, scripted(bad, bad), "ACME")
+    assert r.status == "accepted" and len(r.ledger) == 1
+    assert r.ledger[0]["citation"] == "Net sales increased 18% to $12.4 billion"
+    assert any("struck by the critic" in f for f in r.flags)
+
+
+def test_when_every_line_fails_twice_the_options_baseline_is_reported():
+    bad = good()
+    for x in bad["ledger"]:
+        x["citation"] = "the stock will triple"
+    r = read_release(RELEASE, BASE, 0.032, CONSENSUS, scripted(bad, bad), "ACME")
     assert r.status.startswith("baseline:") and r.forecast is None and "failed checks" in r.flags
+
+
+def test_typography_does_not_fail_a_true_quote():
+    text = norm_quote("Net sales increased 20%\u00a0year\u2011over\u2011year to $200.6\u202fbillion(1) in the "
+                      "second quarter, com\u00adpared with $167.7 billion")
+    assert quote_in("Net sales increased 20% year-over-year to $200.6 billion in the second quarter, "
+                    "compared with $167.7 billion", text)
+    assert not quote_in("Net sales increased 21% year-over-year to $200.6 billion", text)   # numbers still exact
 
 
 def test_risk_flags_large_moves_low_confidence_and_missing_consensus():
@@ -104,3 +122,9 @@ def test_invalid_fields_are_reported():
     bad = good()
     bad["ledger"][0]["direction"] = "sideways"
     assert any("direction must be one of" in p for p in problems_with(bad, norm_quote(RELEASE)))
+
+
+def test_the_critic_shows_where_a_quote_stops_matching():
+    problems = problems_with({"ledger": [{"factor": "x", "direction": "up", "magnitude": "none", "strength": "weak",
+                                          "citation": "Net sales increased 18% to $12.9 billion"}]}, norm_quote(RELEASE))
+    assert "matches up to 'net sales increased 18% to', then says ' $12.4 billion" in problems[0]

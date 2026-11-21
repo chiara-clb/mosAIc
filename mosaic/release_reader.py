@@ -60,11 +60,19 @@ TASK = (
 
 # ---------------------------------------------------------------- quotes
 
+INVISIBLE = {ord(c): None for c in "\u2122\u00ae\u00a9\u2022\u00ad\u200b\u200c\u200d\u2060\ufeff"}
+DASHES = {ord(c): "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe63\uff0d"}
+SPACES = {ord(c): " " for c in "\u00a0\u2002\u2003\u2007\u2009\u200a\u202f\u205f\u3000"}
+
+
 def norm_quote(s: str) -> str:
-    """For verbatim checks: curly quotes, dashes and spaces made plain, trademark signs dropped, case folded."""
-    s = s.translate({ord(c): None for c in "™®©•"})
-    s = s.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
-    s = s.replace("–", "-").replace("—", "-").replace(" ", " ").replace("…", "...")
+    """For verbatim checks: typography made plain (quotes, hyphens and dashes, special and invisible spaces,
+    trademark signs, footnote marks like (1) or *), whitespace collapsed, case folded. Words and numbers
+    must still match exactly."""
+    s = s.translate(INVISIBLE).translate(DASHES).translate(SPACES)
+    s = s.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
+    s = s.replace("\u2026", "...")
+    s = re.sub(r"(?<=[a-z%)])\s*(\(\d\)|\*+|[\u00b9\u00b2\u00b3\u2074-\u2079])", "", s, flags=re.I)
     s = re.sub(r"\$\s+", "$", " ".join(s.split()))
     s = re.sub(r"\(\s+", "(", s)
     s = re.sub(r"\s+\)", ")", s)
@@ -125,6 +133,18 @@ def apply_ledger(prior: dict[str, float], ledger: list[dict], c_dir: float = C_D
 
 # ---------------------------------------------------------------- checks
 
+def where_it_differs(quote: str, release_norm: str) -> str:
+    """The longest start of the quote found in the release, and what the release says next, to show the difference."""
+    words = norm_quote(quote).split()
+    for n in range(len(words) - 1, 2, -1):
+        head = " ".join(words[:n])
+        at = release_norm.find(head)
+        if at >= 0:
+            nxt = release_norm[at + len(head): at + len(head) + 60]
+            return f" (the release matches up to {head[-40:]!r}, then says {nxt!r})"
+    return ""
+
+
 def problems_with(reply: dict | None, release_norm: str) -> list[str]:
     if not isinstance(reply, dict):
         return ["the reply was not a JSON object"]
@@ -142,7 +162,8 @@ def problems_with(reply: dict | None, release_norm: str) -> list[str]:
                 out.append(f"ledger[{i}].{key} must be one of {', '.join(allowed)}")
         if not quote_in(str(x.get("citation", "")), release_norm):
             out.append(f"ledger[{i}] ({str(x.get('factor', ''))[:50]}): the citation is not in the release word for "
-                       f"word: {str(x.get('citation', ''))[:100]!r}")
+                       f"word: {str(x.get('citation', ''))[:100]!r}" + where_it_differs(str(x.get("citation", "")),
+                                                                                        release_norm))
     return out
 
 
@@ -194,12 +215,21 @@ def read_release(release_text: str, baselines: dict, tau: float, consensus: list
         trace.add("critic", "step", note="accepted" if not problems else "; ".join(problems)[:300])
         if not problems:
             break
-    if problems:
-        return ReleaseReading("baseline: the ledger failed the checks twice (" + "; ".join(problems)[:200] + ")",
-                              flags=["failed checks"], retries=retries, trace=trace)
-    ledger = reply["ledger"][:6]
-    forecast = apply_ledger(prior, ledger)
     flags = []
+    if problems:
+        # After the second try, strike only the lines that still fail, as a critic would, and say so.
+        good = [x for x in (reply or {}).get("ledger", [])[:6]
+                if isinstance(x, dict) and not problems_with({"ledger": [x]}, release_norm)]
+        if not good:
+            return ReleaseReading("baseline: the ledger failed the checks twice (" + "; ".join(problems)[:200] + ")",
+                                  flags=["failed checks"], retries=retries, trace=trace)
+        dropped = len((reply or {}).get("ledger", [])[:6]) - len(good)
+        flags.append(f"{dropped} ledger line(s) struck by the critic: quote not found in the release after a retry")
+        trace.add("critic", "step", note=f"struck {dropped} line(s), kept {len(good)}")
+        ledger = good
+    else:
+        ledger = reply["ledger"][:6]
+    forecast = apply_ledger(prior, ledger)
     biggest = max(abs(forecast[k] - prior[k]) for k in OUTCOMES)
     if biggest > FLAG_POINTS:
         flags.append(f"large move from the options: {biggest:.1f} points")
