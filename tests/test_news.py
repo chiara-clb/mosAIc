@@ -67,7 +67,7 @@ def test_gdelt_calls_are_cached(tmp_path):
     items = news_items("Intel Corporation", "INTC", AS_OF, g, embed)
     assert len(items) == 1 and items[0]["event"] == "news" and items[0]["first_seen"] < AS_OF
     Gdelt(tmp_path / "cache.json", http_get=http, spacing=0).fetch("Intel Corporation", "INTC", AS_OF)
-    assert calls == ["artlist", "timelinetone"]                       # the second run used the cache
+    assert calls == ["artlist"] * 14 + ["timelinetone"]               # the second run used the cache
 
 
 def test_a_refused_gdelt_call_is_retried_and_not_cached(tmp_path, capsys):
@@ -90,7 +90,7 @@ def test_a_gdelt_failure_is_reported_and_tried_again_next_run(tmp_path, capsys):
 
     g = Gdelt(tmp_path / "cache.json", http_get=down, spacing=0, retries=1)
     assert news_items("Intel Corporation", "INTC", AS_OF, g, embed) == []
-    assert len(g.errors) == 2 and "no network" in g.errors[0]
+    assert len(g.errors) == 15 and "no network" in g.errors[0]
     assert "GDELT news could not be fetched" in capsys.readouterr().err
 
     calls = []
@@ -100,4 +100,24 @@ def test_a_gdelt_failure_is_reported_and_tried_again_next_run(tmp_path, capsys):
 
     g2 = Gdelt(tmp_path / "cache.json", http_get=up, spacing=0)
     assert len(news_items("Intel Corporation", "INTC", AS_OF, g2, embed)) == 1
-    assert calls == ["artlist", "timelinetone"]                    # the failure was not cached
+    assert calls == ["artlist"] * 14 + ["timelinetone"]            # the failure was not cached
+
+
+def test_news_is_asked_for_one_whole_day_at_a_time(tmp_path):
+    from mosaic.news import news_days
+    asked = []
+
+    def http(params):
+        if params["mode"] == "artlist":
+            asked.append((params["startdatetime"], params["enddatetime"]))
+            day = params["startdatetime"][:8]
+            return {"articles": [{"url": f"u{day}", "title": f"Intel shares {day}", "seendate": day + "T120000Z"},
+                                 {"url": "same-everywhere", "title": "Intel repeat", "seendate": "20260705T130000Z"}]}
+        return {}
+
+    as_of = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    arts, _ = Gdelt(tmp_path / "c.json", http_get=http, spacing=0).fetch("Intel Corporation", "INTC", as_of)
+    assert asked[0] == ("20260701000000", "20260701235959")
+    assert asked[-1] == ("20260714000000", "20260714235959")          # nothing from the forecast day itself
+    assert len(asked) == 14 and len(news_days(as_of)) == 14
+    assert len(arts["articles"]) == 15                                 # 14 days + one article seen every day, once

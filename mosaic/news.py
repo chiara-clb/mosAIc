@@ -155,14 +155,37 @@ class Gdelt:
         return {}
 
     def fetch(self, company: str, ticker: str, as_of: datetime) -> tuple[dict, dict]:
+        """Headlines from the `news_days` days before as_of, asked for one day at a time.
+
+        GDELT returns at most 250 articles per call, newest first. For a widely covered company one
+        call over two weeks only reaches back a day or so, so each day is a separate call. Days are
+        whole UTC days, so the calls are cached and shared by forecasts on nearby dates.
+        """
         q, fmt = news_query(company, ticker), "%Y%m%d%H%M%S"
-        arts = self({"query": q, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
-                     "startdatetime": (as_of - timedelta(days=SETTINGS.news_days)).strftime(fmt),
-                     "enddatetime": as_of.strftime(fmt)})
+        articles, seen_urls = [], set()
+        for start, end in news_days(as_of):
+            day = self({"query": q, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
+                        "startdatetime": start.strftime(fmt), "enddatetime": end.strftime(fmt)})
+            for a in (day or {}).get("articles", []):
+                key = (a.get("url"), a.get("title"), a.get("seendate"))       # the same article returned twice
+                if key not in seen_urls:
+                    seen_urls.add(key)
+                    articles.append(a)
         tone = self({"query": q, "mode": "timelinetone", "format": "json",
                      "startdatetime": (as_of - timedelta(days=SETTINGS.news_days + SETTINGS.tone_base_days)).strftime(fmt),
                      "enddatetime": as_of.strftime(fmt)})
-        return arts, tone
+        return {"articles": articles}, tone
+
+
+def news_days(as_of: datetime) -> list[tuple[datetime, datetime]]:
+    """Whole UTC days before as_of's date: (00:00:00, 23:59:59) for each of the last `news_days` days."""
+    last = as_of.astimezone(timezone.utc).date() if as_of.tzinfo else as_of.date()
+    days = []
+    for k in range(SETTINGS.news_days, 0, -1):
+        d = last - timedelta(days=k)
+        start = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        days.append((start, start + timedelta(hours=23, minutes=59, seconds=59)))
+    return days
 
 
 def news_items(company: str, ticker: str, as_of: datetime, gdelt: Gdelt, embed) -> list[dict]:
