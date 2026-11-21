@@ -30,6 +30,8 @@ llm = ["anthropic>=0.40", "langchain-core>=0.3", "langchain-anthropic>=0.3"]
 local = ["langchain-huggingface>=0.1", "transformers>=4.44", "accelerate>=0.33", "torch>=2.3"]
 # Agent roles and shared state (Checkpoint 4)
 frameworks = ["crewai>=0.80", "mcp>=2.0"]
+# CrewAI agents at runtime (--backend crewai)
+crew = ["crewai>=0.80"]
 # Interface
 ui = ["streamlit>=1.38"]
 dev = ["pytest>=8.0"]

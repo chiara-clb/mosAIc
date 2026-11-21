@@ -3,6 +3,7 @@
 - "scripted": answers written in advance, including deliberate mistakes. Used for the demo and the tests.
 - "anthropic": Claude through the Anthropic API (needs ANTHROPIC_API_KEY).
 - "hf": a local Hugging Face model such as Qwen2.5-3B (needs a GPU).
+- "crewai": the role cards as CrewAI agents, each answering with a Claude model (mosaic/crew.py).
 
 Every backend is a function chat(messages, max_tokens) -> str, so agents never depend on which one runs.
 """
@@ -199,4 +200,8 @@ def make_model(backend: str = "scripted", script: dict | None = None, model_name
     if backend == "hf":
         name = model_name or "Qwen/Qwen2.5-3B-Instruct"
         return Model(hf_chat(name), budget, name=name)
+    if backend == "crewai":                                # the role cards as CrewAI agents (mosaic/crew.py)
+        from mosaic.crew import crewai_chat
+        name = model_name or SETTINGS.llm_model
+        return Model(crewai_chat(name), budget, name=f"crewai:{name}")
     raise ValueError(f"unknown backend {backend!r}")
