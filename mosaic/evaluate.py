@@ -347,12 +347,19 @@ def with_plain_answers(chat: Chat, memory: str = "I don't know", probs: dict | N
 
 # --- command line -------------------------------------------------------------------------------
 
-def make_chat(backend: str, model_name: str | None) -> tuple[Chat, str]:
+def model_label(name: str, thinking: bool) -> str:
+    """The model name as written in the results, saying whether a Claude 5 model was thinking."""
+    from mosaic.llm import NEW_CLAUDE
+    return f"{name} (thinking {'on' if thinking else 'off'})" if NEW_CLAUDE.search(name) else name
+
+
+def make_chat(backend: str, model_name: str | None, thinking: bool | None = None) -> tuple[Chat, str]:
     """One chat function for the whole run (a local model is loaded once)."""
     from mosaic.llm import anthropic_chat, hf_chat, scripted_chat
     if backend == "anthropic":
         name = model_name or SETTINGS.llm_model
-        return anthropic_chat(name), name
+        thinking = SETTINGS.llm_thinking if thinking is None else thinking
+        return anthropic_chat(name, thinking=thinking), model_label(name, thinking)
     if backend == "hf":                                       # pragma: no cover - needs a GPU
         name = model_name or "Qwen/Qwen2.5-3B-Instruct"
         return hf_chat(name), name
@@ -363,6 +370,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="mosaic.evaluate", description=__doc__.split("\n\n")[0])
     p.add_argument("--backend", default="anthropic", choices=["anthropic", "hf", "scripted"])
     p.add_argument("--model", default=None)
+    p.add_argument("--thinking", choices=["on", "off"], default=None,
+                   help="Claude 5 thinking (default: on, or MOSAIC_LLM_THINKING)")
     p.add_argument("--tickers", default=",".join(DEFAULT_TICKERS), help='comma-separated, or "all" for the 30 stocks')
     p.add_argument("--start", default=CUTOFF)
     p.add_argument("--end", default=None, help="last forecast date (default: today)")
@@ -391,7 +400,7 @@ def main(argv=None) -> int:
     if not dates:
         print("No forecast dates whose 21 trading days have already passed.")
         return 2
-    chat, name = make_chat(a.backend, a.model)
+    chat, name = make_chat(a.backend, a.model, None if a.thinking is None else a.thinking == "on")
     print(f"{len(tickers)} stocks x {len(dates)} dates ({dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}), model {name}.")
     answer_key, unscorable = None, []
     if a.options_dir:

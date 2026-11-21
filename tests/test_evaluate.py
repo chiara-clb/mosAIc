@@ -188,3 +188,11 @@ def test_options_dir_adds_the_answer_key(monkeypatch, tmp_path):
     assert seen["key"] is None
     assert E.main(args + ["--options-dir", str(tmp_path)]) == 0
     assert callable(seen["key"])
+
+
+def test_the_results_say_whether_claude_was_thinking():
+    from mosaic.evaluate import model_label, parse_args
+    assert model_label("claude-haiku-5-5", True) == "claude-haiku-5-5 (thinking on)"
+    assert model_label("claude-haiku-5-5", False) == "claude-haiku-5-5 (thinking off)"
+    assert model_label("Qwen/Qwen2.5-3B-Instruct", True) == "Qwen/Qwen2.5-3B-Instruct"
+    assert parse_args(["--thinking", "off"]).thinking == "off" and parse_args([]).thinking is None
