@@ -88,8 +88,8 @@ with st.sidebar:
         rd_consensus = st.text_input("Folder of consensus estimates", "data/consensus")
         rd_model = st.text_input("Claude model for the release reader", "claude-haiku-5-5")
         if not os.environ.get("ANTHROPIC_API_KEY"):
-            st.warning("ANTHROPIC_API_KEY is not set: the baselines work, the release reader does not.")
-        rd_go = st.button("Show the baselines", type="primary", disabled=rd_day is None)
+            st.warning("ANTHROPIC_API_KEY is not set: the release reader needs it.")
+        rd_go = st.button("Run the results-day forecast", type="primary", disabled=rd_day is None)
         go = False
     else:
         rd_go = False
@@ -110,109 +110,166 @@ with st.sidebar:
         st.warning("Set MOSAIC_SEC_USER_AGENT to 'Your Name your.email@example.com' before using a real stock.")
     st.caption(f"Graph engine: {graph_engine()[3]}")
 
-# --- results day: three baselines for the next-day move ---------------------------------------
+# --- results day: the agents forecast the next-day move right after a results release ----------
 if mode.startswith("Results"):
-    from mosaic.results_day import NEW_YORK, load_live, rows as rd_rows
+    from mosaic.results_day import NEW_YORK
     st.subheader("Results day: how much will the stock move the day after results?")
-    st.caption("For a release after the close, the move from that close to the next day's close, in three buckets. "
-               "A large move is beyond half the size of the stock's last eight results-day moves. "
-               "Three baselines, all known before the release. No model is called.")
-    if rd_go:
-        st.session_state["reading"] = None
-        st.session_state["reader_error"] = None
-        with st.spinner("Loading SEC results dates, prices and option quotes…"):
-            try:
-                st.session_state["rd"] = load_live(rd_ticker, rd_day, rd_options or None)
-            except Exception as exc:                            # show the reason instead of a stack trace
-                st.session_state["rd"] = None
-                st.error(f"Could not compute the baselines: {exc}")
-    rd = st.session_state.get("rd")
-    reading = st.session_state.get("reading")
-    if rd is None:
-        st.info("Choose a stock and one of its results releases, for example AMZN 2026-07-30, NVDA 2026-08-26 "
-                "or GOOGL 2026-07-22, and press **Show the baselines**.")
-        st.stop()
-    st.markdown(f"**{rd.ticker}** reported at **{rd.release.astimezone(NEW_YORK):%H:%M} New York time** on "
-                f"{rd.t0}. A large move is beyond **±{rd.tau * 100:.1f}%** "
-                f"(half of {rd.J * 100:.1f}%, the typical size of its last {len(rd.past_moves)} results-day moves).")
-    table = pd.DataFrame(rd_rows(rd)).set_index("Baseline")
-    if reading is not None and reading.forecast:
-        mosaic_row = {"Fall %": reading.forecast["fall"], "Flat %": reading.forecast["flat"],
-                      "Gain %": reading.forecast["gain"]}
-        if rd.actual:
-            mosaic_row["Chance given to what happened %"] = reading.forecast[rd.actual["outcome"]]
-        table.loc["MosAIc · after reading the release"] = mosaic_row
-    left, right = st.columns([3, 2])
-    left.table(table.map(lambda v: "–" if pd.isna(v) else f"{v:.1f}"))
-    chart = table[["Fall %", "Flat %", "Gain %"]].dropna()
-    if len(chart):
-        chart.index = [b.split(" ·")[0] for b in chart.index]              # short legend names: B1, B2, B3
-        chart.columns = ["Large fall", "Flat", "Large gain"]
-        try:
-            import altair as alt
-            long = chart.reset_index(names="Baseline").melt("Baseline", var_name="Outcome", value_name="Percent")
-            right.altair_chart(
-                alt.Chart(long).mark_bar()
-                .encode(x=alt.X("Outcome:N", sort=list(chart.columns), title=None, axis=alt.Axis(labelAngle=0)),
-                        xOffset=alt.XOffset("Baseline:N", sort=list(chart.index)),
-                        y=alt.Y("Percent:Q", title="%", scale=alt.Scale(domain=[0, 100])),
-                        color=alt.Color("Baseline:N", sort=list(chart.index),
-                                        legend=alt.Legend(orient="bottom", title=None)),
-                        tooltip=["Baseline", "Outcome", alt.Tooltip("Percent:Q", format=".1f")])
-                .properties(height=280), use_container_width=True)
-        except Exception:                                        # an older Altair: plain side-by-side bars
-            right.bar_chart(chart.T, stack=False)
-        right.caption("B1 one year of daily moves · B2 previous results days · B3 options at the close"
-                      + (" · MosAIc: B3 adjusted by the release reader's ledger" if reading is not None and reading.forecast else ""))
-    if rd.actual:
-        st.success(f"What happened: **{rd.actual['move'] * 100:+.1f}%** on {rd.t1}, a **{rd.actual['outcome']}**.")
-    for n in rd.notes:
-        st.caption("Note: " + n)
-    with st.expander("The previous results-day moves behind the barrier"):
-        plain_table([{"Reaction day": d, "Move %": round(m * 100, 1)} for d, m in rd.past_moves])
-
-    st.markdown("#### The release reader")
-    st.caption("An agent reads the press release (Exhibit 99.1 of the results 8-K) next to the baselines and the "
-               "analysts' consensus, and writes a ledger with exact quotes. Code checks every quote and sends the "
-               "ledger back once if one fails; the ledger then adjusts B3. The agent has no tools.")
-    if rd.baselines.get("B3") is None:
-        why = next((n.removeprefix("options: ") for n in rd.notes if n.startswith("options:")), "no option prices")
-        st.warning(f"The release reader adjusts B3, the options baseline, which could not be computed for this "
-                   f"release ({why}). Choose a release marked “options available”, or check the option files.")
-    elif st.button("Read the release with Claude"):
+    with st.expander("How this works", expanded=False):
+        st.markdown(
+            "The forecast is made a few minutes after a release published after the 16:00 New York close. The "
+            "question is the move from that close to the next day's close: a large fall, flat, or a large gain, "
+            "where large means beyond half the size of the stock's last eight results-day moves.\n\n"
+            "| Step | Who | What it does |\n|---|---|---|\n"
+            "| Coordinator | code | Confirms through the tools that the release came after the close |\n"
+            "| Quant | code | B1 from a year of daily moves, B2 from past results-day moves, B3 from the option "
+            "prices at the close |\n"
+            "| Fetch release | code | Gets the press release through the tool door, under the forecast-date rule, "
+            "with the consensus values |\n"
+            "| Release reader | **agent (Claude)** | Reads the release against the baselines and the consensus, writes a "
+            "ledger with exact quotes. No tools |\n"
+            "| Critic | code | Every quote must be in the release; failing lines go back with reasons, at most twice, "
+            "then are struck |\n"
+            "| Finalise | code | The ledger tilts B3 into MosAIc's forecast |\n"
+            "| Risk gate | code | Publishes, flags or holds for the analyst, as in the monthly forecast |\n\n"
+            "The agents never see the next day's price; it is shown below only to compare.")
+    if rd_go and rd_day is not None:
         from mosaic.llm import make_model
-        from mosaic.release_reader import fetch_release, load_consensus, read_release
-        with st.spinner("Fetching the press release and reading it…"):
+        from mosaic.results_graph import live_results_case, run_results_day
+        st.session_state.update(rd_state=None, rd_reviewed=None, rd_error=None)
+        with st.status("The results-day agents are working…", expanded=True) as status:
+            shown = st.empty()
+            lines: list[str] = []
+
+            def show(line: str | None) -> None:
+                if line:
+                    lines.append(line)
+                    shown.code("\n".join(lines[-25:]), language=None)
+
             try:
-                text = fetch_release(rd.ticker, rd.release)
-                consensus = load_consensus(rd_consensus, rd.ticker, rd.t0) if rd_consensus else []
-                st.session_state["reading"] = read_release(text, rd.baselines, rd.tau, consensus,
-                                                           make_model("anthropic", model_name=rd_model), rd.ticker)
-                st.session_state["consensus_n"] = len(consensus)
-                st.session_state["reader_error"] = None
-            except Exception as exc:                              # kept for the next draw, so it stays on screen
-                st.session_state["reader_error"] = f"{type(exc).__name__}: {exc}"
-        st.rerun()
-    if st.session_state.get("reader_error"):
-        st.error("The release reader could not run: " + st.session_state["reader_error"])
-    if reading is not None:
-        from mosaic.release_reader import ledger_rows as release_ledger
-        n = st.session_state.get("consensus_n", 0)
-        st.markdown(f"**Status:** {reading.status} · consensus values given: {n} · retries: {reading.retries}"
-                    + (f" · confidence: {reading.confidence}" if reading.confidence else ""))
-        if reading.flags:
-            st.warning("Flagged for the analyst: " + "; ".join(reading.flags))
-        if reading.read:
-            st.markdown(f"> {reading.read}")
-        plain_table(release_ledger(reading), empty="No ledger: the options baseline is reported.")
-        with st.expander("Full log of the reading (model replies and checks)"):
-            log = []
-            for e in reading.trace.events:
-                if e["kind"] == "model_call":
-                    log.append(f"Release reader reply (parsed: {e.get('parsed')}):\n{e.get('reply', '')}")
-                else:
-                    log.append(f"Critic: {e.get('note', '')}")
-            st.code("\n\n".join(log), language=None)
+                show("Loading the release, prices, option quotes and consensus (saved data is reused)")
+                world, closes = live_results_case(rd_ticker, rd_day, rd_options or None, rd_consensus or None)
+                state, run = run_results_day(world, make_model("anthropic", model_name=rd_model),
+                                             on_event=lambda e: show(progress_line(e)))
+                st.session_state.update(rd_state=state, rd_run=run, rd_closes=closes)
+                status.update(label=f"Done: {state['final']['status']}, {state['final'].get('review', '')}",
+                              state="complete", expanded=False)
+            except Exception as exc:                            # keep the reason on screen
+                st.session_state["rd_error"] = f"{type(exc).__name__}: {exc}"
+                status.update(label="The run failed", state="error")
+    if st.session_state.get("rd_error"):
+        st.error("The results-day run failed: " + st.session_state["rd_error"])
+    rstate = st.session_state.get("rd_state")
+    if rstate is None:
+        st.info("Choose a stock and one of its results releases, for example AMZN, NVDA or GOOGL Q2 2026, and press "
+                "**Run the results-day forecast**.")
+        st.stop()
+    from mosaic.results_graph import STRENGTHS, actual_move, apply_results_review
+    rrun = st.session_state["rd_run"]
+    base = rstate.get("baseline") or {}
+    rfinal = st.session_state.get("rd_reviewed") or rstate["final"]
+    rfacts = run_facts(rstate, rrun)
+    req = rstate["request"]
+    st.markdown(f"**{req['company']} ({req['ticker']})** reported at "
+                f"**{req['release'].astimezone(NEW_YORK):%H:%M} New York time** on {req['release'].astimezone(NEW_YORK):%Y-%m-%d}."
+                + (f" A large move is beyond **±{base['tau'] * 100:.1f}%** (half of {base['J'] * 100:.1f}%, the typical "
+                   f"size of its last {len(base['past_moves'])} results-day moves)." if base.get("tau") else ""))
+    colour = {"publish": "green", "flag": "orange", "hold": "red"}.get(rfacts["review"], "gray")
+    st.markdown(f"**Status:** {rfinal['status']}  ·  **Risk gate:** :{colour}[{rfacts['review']}]")
+    for t in rfacts["triggers"]:
+        st.markdown(f"- {t}")
+    for w in rfinal.get("why") or []:
+        st.warning(w)
+    if review_summary(rfinal):
+        st.success(f"**{review_summary(rfinal)}.** The forecast shown is the analyst's; the agent's is next to it.")
+    elif rfacts["review"] == "hold":
+        st.info("Held for the analyst: open the **Analyst review** tab to keep, resize or strike each line.")
+    st.caption(f"Model: {rfacts['model']}, {rfacts['model_calls']} calls · Tool calls: {rfacts['tool_calls']} · "
+               f"Retries: {rfacts['retries']} · Leakage audit: {rfacts['leakage']}")
+
+    names = ["Forecast and ledger", "Analyst review", "Evidence", "Steps", "Tool calls", "Full log"]
+    tabs = dict(zip(names, st.tabs(names)))
+    with tabs["Forecast and ledger"]:
+        rows = []
+        labels = {"B1": "B1 · one year of daily moves", "B2": "B2 · previous results days",
+                  "B3": "B3 · options at the close"}
+        for key, label in labels.items():
+            p = base.get(key)
+            rows.append({"Forecast": label, "Fall %": p and p["fall"], "Flat %": p and p["flat"], "Gain %": p and p["gain"]})
+        if rfinal.get("agent_probabilities"):
+            a = rfinal["agent_probabilities"]
+            rows.append({"Forecast": "MosAIc · agent", "Fall %": a["fall"], "Flat %": a["flat"], "Gain %": a["gain"]})
+            rows.append({"Forecast": "MosAIc · after the analyst's review", "Fall %": rfinal["probabilities"]["fall"],
+                         "Flat %": rfinal["probabilities"]["flat"], "Gain %": rfinal["probabilities"]["gain"]})
+        elif rfinal["status"].startswith("accepted"):
+            p = rfinal["probabilities"]
+            rows.append({"Forecast": "MosAIc · after reading the release", "Fall %": p["fall"], "Flat %": p["flat"],
+                         "Gain %": p["gain"]})
+        actual = actual_move(st.session_state["rd_closes"], req["release"].astimezone(NEW_YORK).date(),
+                             base["tau"]) if base.get("tau") else None
+        if actual:
+            for r in rows:
+                v = r.get({"fall": "Fall %", "flat": "Flat %", "gain": "Gain %"}[actual["outcome"]])
+                r["Chance given to what happened %"] = v
+        table = pd.DataFrame(rows).set_index("Forecast")
+        left, right = st.columns([3, 2])
+        left.table(table.map(lambda v: "–" if v is None or pd.isna(v) else f"{v:.1f}"))
+        chart = table[["Fall %", "Flat %", "Gain %"]].dropna()
+        if len(chart):
+            chart.index = [i.split(" ·")[0] if i.startswith("B") else i.replace("MosAIc · ", "MosAIc ") for i in chart.index]
+            chart.columns = ["Large fall", "Flat", "Large gain"]
+            try:
+                import altair as alt
+                long = chart.reset_index(names="Forecast").melt("Forecast", var_name="Outcome", value_name="Percent")
+                right.altair_chart(
+                    alt.Chart(long).mark_bar()
+                    .encode(x=alt.X("Outcome:N", sort=list(chart.columns), title=None, axis=alt.Axis(labelAngle=0)),
+                            xOffset=alt.XOffset("Forecast:N", sort=list(chart.index)),
+                            y=alt.Y("Percent:Q", title="%", scale=alt.Scale(domain=[0, 100])),
+                            color=alt.Color("Forecast:N", sort=list(chart.index),
+                                            legend=alt.Legend(orient="bottom", title=None)),
+                            tooltip=["Forecast", "Outcome", alt.Tooltip("Percent:Q", format=".1f")])
+                    .properties(height=280), use_container_width=True)
+            except Exception:
+                right.bar_chart(chart.T, stack=False)
+        if actual:
+            st.success(f"What happened (never shown to the agents): **{actual['move'] * 100:+.1f}%** on "
+                       f"{actual['day']}, a **{actual['outcome']}**.")
+        if rfinal.get("read"):
+            st.markdown(f"**The reader's view:** {rfinal['read']}")
+        st.markdown("#### Ledger")
+        plain_table(ledger_rows(rstate, rfinal), empty="No ledger: the options baseline is reported.")
+        for n in base.get("notes") or []:
+            st.caption("Note: " + n)
+    with tabs["Analyst review"]:
+        if not rstate["final"]["ledger"]:
+            st.write("Nothing to review: the options baseline is reported.")
+        else:
+            if review_summary(rfinal) and st.button("Undo review", key="rd-undo"):
+                st.session_state["rd_reviewed"] = None
+                st.rerun()
+            decisions = {}
+            for i, line in enumerate(rstate["final"]["ledger"]):
+                choice = st.selectbox(f"#{i + 1} {line['reason'][:70]} ({line['effect']}, {line['strength']})",
+                                      ["keep", "strike"] + [f"resize to {s}" for s in STRENGTHS], key=f"rd-review-{i}")
+                decisions[i] = choice.split()[-1] if choice.startswith("resize") else choice
+            if st.button("Apply review", key="rd-apply"):
+                st.session_state["rd_reviewed"] = apply_results_review(rstate["final"], decisions)
+                st.rerun()
+    with tabs["Evidence"]:
+        plain_table(evidence_rows(rstate))
+        cons = rstate.get("consensus") or []
+        st.caption(f"Consensus values given to the reader: {len(cons)} (values only, never the articles they came from).")
+        if cons:
+            plain_table([{"Metric": c["metric"], "Provider": c["provider"], "Value": c["value"], "Unit": c["unit"],
+                          "Basis": c["basis"]} for c in cons])
+    with tabs["Steps"]:
+        plain_table(step_rows(rstate))
+    with tabs["Tool calls"]:
+        plain_table(tool_rows(rrun))
+    with tabs["Full log"]:
+        log = text_log(rstate, rrun, rfinal)
+        st.download_button("Download log", log, file_name=f"{rrun.tools.trace.run_id}.log.txt")
+        st.code(log, language=None)
     st.stop()
 
 if go:
