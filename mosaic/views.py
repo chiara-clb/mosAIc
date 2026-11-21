@@ -55,7 +55,7 @@ def ledger_rows(state: dict, final: dict | None = None) -> list[dict]:
 
 def evidence_rows(state: dict) -> list[dict]:
     return [{"Id": e["id"], "Kind": e["kind"], "Published": f"{e['published']:%Y-%m-%d}", "Header": e["header"],
-             "Covered by news": ", ".join(c["id"] for c in e.get("coverage") or []),
+             "News on the same event": ", ".join(c["id"] for c in e.get("coverage") or []),
              "Novelty": round(e.get("novelty", 0), 2), "Price reaction": e.get("reaction") or "-"}
             for e in state.get("evidence") or []]
 
