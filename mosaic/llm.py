@@ -165,12 +165,19 @@ def anthropic_chat(model: str | None = None, client=None, temperature: float | N
         client = anthropic.Anthropic()
     model = model or SETTINGS.llm_model
     temperature = SETTINGS.llm_temperature if temperature is None else temperature
+    sampling = {"temperature": temperature}
 
     def chat(messages: list[dict], max_tokens: int = 300) -> str:
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         rest = [m for m in messages if m["role"] != "system"]
-        r = client.messages.create(model=model, system=system, messages=rest, max_tokens=max_tokens,
-                                   temperature=temperature)
+        try:
+            r = client.messages.create(model=model, system=system, messages=rest, max_tokens=max_tokens, **sampling)
+        except TypeError as e:
+            # Newer versions of the anthropic package no longer take a temperature; the model's default is used.
+            if "temperature" not in str(e) or not sampling:
+                raise
+            sampling.clear()
+            r = client.messages.create(model=model, system=system, messages=rest, max_tokens=max_tokens)
         return "".join(getattr(b, "text", "") for b in r.content).strip()
     return chat
 

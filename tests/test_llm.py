@@ -91,3 +91,17 @@ def test_make_model_scripted_and_unknown():
     assert m.name == "scripted" and json.loads(m(agent_messages("critic", "", {"passage": "a", "quote": "b"})))["supported"]
     with pytest.raises(ValueError):
         make_model("gpt")
+
+
+def test_anthropic_chat_works_with_a_package_that_has_no_temperature():
+    seen = []
+
+    class NoTemperature:
+        def create(self, *, model, system, messages, max_tokens):
+            seen.append(model)
+            return SimpleNamespace(content=[SimpleNamespace(text="ok")])
+
+    chat = anthropic_chat("claude-haiku-5-5", client=SimpleNamespace(messages=NoTemperature()))
+    assert chat([{"role": "user", "content": "hi"}]) == "ok"
+    assert chat([{"role": "user", "content": "hi"}]) == "ok"
+    assert len(seen) == 2
