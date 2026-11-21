@@ -123,4 +123,13 @@ def test_only_after_close_releases_can_be_chosen_newest_first():
     choices = release_choices(releases, option_quarters={(2026, 3)}, since=date(2023, 1, 1))
     assert [c["day"] for c in choices] == [date(2026, 7, 30), date(2026, 4, 29)]
     assert choices[0]["options"] and not choices[1]["options"]
-    assert choices[0]["label"] == "2026-07-30 · 17:30 New York · options available"
+    assert choices[0]["label"] == "Q2 2026 results · released 30 Jul 2026 · options available"
+    assert choices[1]["label"] == "Q1 2026 results · released 29 Apr 2026"
+
+
+def test_the_quarter_reported_is_the_last_one_to_end_before_the_release():
+    from mosaic.results_day import quarter_reported
+    assert quarter_reported(date(2026, 7, 30)) == "Q2 2026"
+    assert quarter_reported(date(2026, 8, 26)) == "Q2 2026"            # Nvidia's quarter ended in late July
+    assert quarter_reported(date(2026, 2, 4)) == "Q4 2025"
+    assert quarter_reported(date(2026, 4, 2)) == "Q4 2025"            # too early to report Q1

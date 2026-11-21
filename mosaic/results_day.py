@@ -163,6 +163,14 @@ def after_close_releases(releases: list[datetime], since: date | None = None) ->
     return sorted(out, reverse=True)
 
 
+def quarter_reported(release_day: date) -> str:
+    """The calendar quarter a release reports: the last quarter to end at least two weeks before it."""
+    d = release_day - timedelta(days=14)
+    q = (d.month - 1) // 3                       # quarters fully ended before d's quarter began
+    year = d.year if q else d.year - 1
+    return f"Q{q if q else 4} {year}"
+
+
 def release_choices(releases: list[datetime], option_quarters: set[tuple[int, int]] | None = None,
                     since: date | None = None) -> list[dict]:
     """One entry per after-close release, for a picker: its day, time, and whether option prices cover it."""
@@ -171,8 +179,9 @@ def release_choices(releases: list[datetime], option_quarters: set[tuple[int, in
         local = r.astimezone(NEW_YORK)
         d = local.date()
         has_options = option_quarters is not None and (d.year, (d.month - 1) // 3 + 1) in option_quarters
-        label = f"{d} · {local:%H:%M} New York" + (" · options available" if has_options else "")
-        out.append({"day": d, "release": r, "options": has_options, "label": label})
+        q = quarter_reported(d)
+        label = f"{q} results · released {d:%d %b %Y}" + (" · options available" if has_options else "")
+        out.append({"day": d, "release": r, "options": has_options, "label": label, "quarter": q})
     return out
 
 
