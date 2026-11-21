@@ -91,6 +91,14 @@ python -m mosaic.evaluate --backend anthropic --model claude-haiku-5-5 \
 
 Add `--limit 2` for a cheap first try. Results go to `results/evaluation/`, and `--resume` continues an interrupted run.
 
+**Results day (a first step towards forecasting right after results).** For a stock that reports after the close, three baselines for the move to the next day's close, all known before the release: one year of daily moves (B1), the stock's last eight results-day moves (B2), and the option prices at the close (B3, from the FirstRate files). No model is called, and the actual move is shown next to them:
+
+```bash
+python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate
+```
+
+It is also the third choice in the app's sidebar. The option code is ported from an earnings-release prototype, in which an agent that reads the release itself scored better than all three baselines on 40 releases (see the report).
+
 **In the browser** (a simple Streamlit screen):
 
 ```bash
