@@ -68,6 +68,7 @@ class ToolBox:
         self.failures = set(failures)
         self.extra_roles = extra_roles or {}
         self.branch_log: list[dict] = []
+        self.off: set[str] = set()                         # guardrails switched off, for the ablation only
         self.tools = {"market_data": self.market_data, "search_documents": self.search_documents,
                       "search_news": self.search_news, "case_memory": self.case_memory,
                       "branch_log": self.log_branch, "get_passage": self.get_passage}
@@ -79,8 +80,9 @@ class ToolBox:
             self.trace.add(caller, "tool_call", tool=tool, args=args, status="unknown tool")
             raise ValueError(f"unknown tool {tool!r}")
         if not can_use(caller, tool, self.extra_roles):
-            self.trace.add(caller, "tool_call", tool=tool, args=args, status="refused: not in role")
-            raise RoleError(f"{caller} may not use {tool}")
+            if "role_check" not in self.off:
+                self.trace.add(caller, "tool_call", tool=tool, args=args, status="refused: not in role")
+                raise RoleError(f"{caller} may not use {tool}")
         if tool in self.failures:
             self.trace.add(caller, "tool_call", tool=tool, args=args, status="error")
             raise ToolError(f"{tool} is unavailable")
@@ -95,7 +97,8 @@ class ToolBox:
     # --- the forecast-date rule -------------------------------------------------------------
     def visible(self, item: dict, since=None) -> bool:
         t = published(item)
-        return t < self.as_of and (since is None or t >= since)
+        before = t < self.as_of or "date_rule" in self.off
+        return before and (since is None or t >= since)
 
     def passage(self, item_id: str) -> dict | None:
         """Code-side lookup of a full item, never offered to the research model. None if not yet published."""

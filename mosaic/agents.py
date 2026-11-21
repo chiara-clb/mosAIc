@@ -117,7 +117,7 @@ def research(state: dict, run: Run, agent: str = "research", full_text: bool = F
         except ToolError as exc:
             return {"error": [f"research: {exc}"], "_note": f"{a['action']} unavailable"}
         shown = [{k: h[k] for k in ("id", "header", "score", "extract")} for h in hits]
-        if full_text:                                   # only the single-agent comparison sees whole passages
+        if full_text or "clean_extracts" in tools.off:  # single agent, or the ablation without cleaned extracts
             shown = [{**r, "text": tools.get_passage(r["id"])["text"]} for r in shown]
         observations.append({"tool": a["action"], "query": query, "results": shown})
         notes.append(f"{a['action']}('{query}') -> {len(hits)}")

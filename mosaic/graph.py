@@ -69,7 +69,7 @@ def as_node(name: str, fn, run: A.Run):
 
 def risk_gate(state: dict, run: A.Run) -> dict:
     t = risk_triggers(state, run.tools.calls)
-    level = review_level(t)
+    level = "publish" if "risk_gate" in run.tools.off else review_level(t)
     return {"final": {**state["final"], "review": level, "triggers": t},
             "_note": f"{level}: " + ("; ".join(t) if t else "no trigger")}
 
@@ -123,6 +123,7 @@ def run_forecast(world: World, model: Model, failures=(), options: dict | None =
     trace = Trace(run_id=f"{world.ticker}-{world.as_of:%Y-%m-%d}", as_of=world.as_of)
     run = A.Run(ToolBox(world, trace=trace, failures=failures), model,
                 {"protocol": "two_way", "readings": "tot", **(options or {})})
+    run.tools.off = set(run.options.get("guardrails_off", ()))
     trace.add("run", "start", ticker=world.ticker, as_of=world.as_of.isoformat(), model=model.name,
               engine=(engine or graph_engine())[3], options=run.options)
     graph = build_graph(run, engine)
