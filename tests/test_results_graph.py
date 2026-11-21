@@ -109,3 +109,11 @@ def test_every_field_a_node_writes_is_declared_in_the_state():
     state, _ = run_results_day(world(), scripted(good()))
     declared = set(G.ResultsState.__annotations__)
     assert set(state) <= declared | {"verdict"} and "verdict" in declared
+
+
+def test_what_happened_is_measured_from_the_release_close_to_the_next():
+    from mosaic.results_graph import actual_move
+    closes = synthetic_prices(PAST + [T0])
+    a = actual_move(closes, T0, 0.04)
+    assert a["day"] == date(2026, 7, 31) and a["outcome"] in ("gain", "fall")
+    assert actual_move(closes.loc[:pd.Timestamp(T0)], T0, 0.04) is None        # not known yet

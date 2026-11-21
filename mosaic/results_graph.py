@@ -300,3 +300,50 @@ def apply_results_review(final: dict, decisions: dict[int, str]) -> dict:
     agent_ledger = [{**l, "source": f"{l['source']} #{i + 1}"} for i, l in enumerate(final["ledger"])]
     return {**final, "ledger": kept, "probabilities": probs, "status": "reviewed by analyst",
             "agent_probabilities": final["probabilities"], "agent_ledger": agent_ledger, "review_record": record}
+
+
+# ---------------------------------------------------------------- live data
+
+def actual_move(closes: pd.Series, release_day, tau: float) -> dict | None:
+    """What happened from the release day's close to the next close. Shown to people, never to the agents."""
+    idx = pd.to_datetime(closes.index).normalize()
+    s = pd.Series(closes.to_numpy(float), index=idx).sort_index()
+    t0 = pd.Timestamp(release_day)
+    later = s[s.index > t0]
+    if t0 not in s.index or later.empty:
+        return None
+    import math
+    r = math.log(later.iloc[0] / s.loc[t0])
+    return {"move": r, "day": later.index[0].date(), "outcome": "gain" if r > tau else "fall" if r < -tau else "flat"}
+
+
+def live_results_case(ticker: str, release_day, options_dir: str | None = None, consensus_dir: str | None = None,
+                      sec_get=None, price_fetch=None):                       # pragma: no cover - needs internet
+    """(world for the agents, all closes for showing what happened afterwards)."""
+    from mosaic.baseline import results_dates
+    from mosaic.edgar import list_filings, sec_getter, ticker_to_cik
+    from mosaic.prices import load_closes
+    from mosaic.release_reader import fetch_release, load_consensus
+    from mosaic.results_day import NEW_YORK
+    get = sec_get or sec_getter()
+    company, filings = list_filings(ticker_to_cik(get)[ticker.upper()], get)
+    releases = results_dates(filings)
+    match = [r for r in releases if r.astimezone(NEW_YORK).date() == release_day]
+    if not match:
+        raise ValueError(f"no results 8-K from {ticker} dated {release_day} in its SEC filings")
+    release = match[0]
+    closes = load_closes(ticker.upper(), (release_day - timedelta(days=365 * 3)).isoformat(),
+                         (release_day + timedelta(days=10)).isoformat(), price_fetch)
+    upto_t0 = closes[pd.to_datetime(closes.index).normalize() <= pd.Timestamp(release_day)]
+    chain = None
+    if options_dir:
+        from mosaic.firstrate import chain_before
+        quotes = chain_before(options_dir, ticker, datetime(release_day.year, release_day.month, release_day.day,
+                                                            tzinfo=timezone.utc) + timedelta(days=1), look_back_days=1)
+        if quotes is not None:
+            chain = quotes[quotes["quote_date"] == release_day]
+    consensus = load_consensus(consensus_dir, ticker, release_day) if consensus_dir else []
+    text = fetch_release(ticker, release, get)
+    world = results_world(ticker.upper(), company or ticker.upper(), release, upto_t0,
+                          [r for r in releases if r <= release], text, chain, consensus)
+    return world, closes
