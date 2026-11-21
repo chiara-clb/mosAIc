@@ -150,6 +150,9 @@ def text_log(state: dict, run, final: dict | None = None) -> str:
     out += ["", "LEDGER"] + _table(ledger_rows(state, final))
     out += ["", "EVIDENCE"] + _table(evidence_rows(state))
     out += ["", "TREE OF THOUGHT"] + _table(tot_rows(state))
+    loading = run.tools.world.extra.get("loading")
+    if loading:
+        out += ["", "DATA LOADING"] + ["  " + m.strip() for m in loading]
     out += ["", "EVENTS"]
     for e in run.tools.trace.events:
         line = progress_line(e)

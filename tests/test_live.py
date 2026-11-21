@@ -120,3 +120,6 @@ def test_live_world_reports_each_stage(tmp_path):
     assert any(s.startswith("Indexing") for s in said)
     assert sum(s.startswith("News: ") and "days, downloading)" in s for s in said) == 7
     assert said[-1].startswith("News: ") and said[-1].endswith("stories found")
+    w = live_world("ACME", AS_OF, sec_get=sec_get, gdelt=gdelt(tmp_path), embed=embed,
+                   price_fetch=price_fetch, cache_dir=tmp_path / "px")
+    assert w.extra["loading"][0] == "Listing SEC filings"                  # kept even without a display

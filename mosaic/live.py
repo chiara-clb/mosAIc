@@ -48,7 +48,12 @@ def live_world(ticker: str, as_of: datetime, *, sec_get=None, gdelt: Gdelt | Non
                price_fetch=None, cache_dir=None, history_days: int = 200, price_years: int = 6,
                progress=None) -> LiveWorld:
     """Build the world for a real stock. `progress(message)` is called at each stage, for a live display."""
-    say = progress or (lambda message: None)
+    loading: list[str] = []                # kept in the world, so the run's log shows how the data was loaded
+
+    def say(message: str) -> None:
+        loading.append(message)
+        if progress:
+            progress(message)
     get = sec_get or sec_getter()
     embed = embed or sentence_transformer_embed()
     if gdelt is None:                      # saved Wayback news when it covers this stock and date, else GDELT
@@ -107,4 +112,5 @@ def live_world(ticker: str, as_of: datetime, *, sec_get=None, gdelt: Gdelt | Non
 
     return LiveWorld(ticker=ticker, company=company, as_of=as_of, prices=prices, filings=filings, news=news,
                      case_memory={}, earnings_dates=results_dates(rows), enrich=enrich,
-                     extra={"search_documents": search_documents, "case_rates": case_rates, "index": index})
+                     extra={"search_documents": search_documents, "case_rates": case_rates, "index": index,
+                            "loading": loading})
