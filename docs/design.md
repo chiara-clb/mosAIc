@@ -20,7 +20,7 @@ where σ is the stock's volatility over the past year, scaled to 21 days. The fo
 | Synthesis | Turns evidence into ledger lines with Tree of Thought | Case memory, branch log | The full passages |
 | Critic | Checks quotes, dates and arithmetic, accepts or sends back with a reason | Fetch a passage by its id | The ledger and the passages |
 
-LangGraph runs the flow. Quant and research run at the same time, synthesis waits for both, and the critic's verdict decides the next step. The roles are written as CrewAI role cards. All tools sit behind one interface, in the style of MCP, which checks the caller's role and the forecast date.
+LangGraph runs the flow. Quant and research run at the same time, synthesis waits for both, and the critic's verdict decides the next step. The roles are written as CrewAI role cards, and with `--backend crewai` the model-backed agents run as CrewAI agents. All tools sit behind one interface that checks the caller's role and the forecast date. The same tools can be served by a real MCP server, and a forecast run through it gives the same result as calling them directly.
 
 ## Main decisions and why
 

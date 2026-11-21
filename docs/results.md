@@ -1,6 +1,6 @@
 # Results so far
 
-These come from the three notebooks. None of them uses the option-implied answer key yet, so forecasts are scored against what actually happened (Brier score: lower is better). The answer-key scoring will be added once the option data is loaded.
+Sections 1 to 3 come from the three notebooks, and section 4 from `python -m mosaic.ablation`. None of them uses the option-implied answer key yet, so forecasts are scored against what actually happened (Brier score: lower is better). The answer-key scoring will be added once the option data is loaded.
 
 ## 1. Which baseline
 
@@ -64,3 +64,18 @@ Comparison over the nine scenarios (36 evidence items in total):
 The critic's loop stops made-up quotes, and its reasons are what let a retry fix them. A single agent is cheaper but follows instructions hidden in a filing. The design costs about 40% more model calls than a one-way pipeline.
 
 With a real model (Qwen2.5-3B), the coordination held: the critic's hint led research to the missing filing, and no hidden instruction was followed. The model itself searched poorly and read every item as "no effect", which led to two guards in research (empty or repeated searches are not run, and recent filings are always listed).
+
+## 4. What each guardrail stops
+
+`results/ablation.md`: the nine demo scenarios rerun with one guardrail switched off at a time. As in section 3, the model is scripted with planted mistakes, so this measures the guardrails, not forecasting skill.
+
+| Setup | Made-up quotes published | Hidden instructions followed | Late data used | Published / flagged / held |
+| --- | --- | --- | --- | --- |
+| **All guardrails on (the design)** | **0** | **0** | **0** | **3 / 5 / 1** |
+| No critic loop | 2 | 0 | 0 | 6 / 2 / 1 |
+| No cleaned extracts | 0 | 1 | 0 | 3 / 5 / 1 |
+| No role check on tools | 0 | 1 | 0 | 4 / 4 / 1 |
+| No risk gate | 0 | 0 | 0 | 9 / 0 / 0 |
+| No forecast-date rule | 0 | 0 | 7 | 2 / 5 / 2 |
+
+Each guardrail stops a different failure, and no other guardrail covers for it. Switching off either the cleaned extracts or the role check lets one hidden instruction through, so the two are not redundant. Without the risk gate every forecast is published, including the rare-event one that should wait for the analyst.

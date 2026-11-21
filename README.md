@@ -41,6 +41,7 @@ Results so far are in [docs/results.md](docs/results.md).
 | `docs/design.md` | The design, the main decisions and how they changed during the program |
 | `docs/results.md` | What the notebooks showed |
 | `docs/figures/` | Architecture diagrams |
+| `results/` | The guardrail ablation and design comparison on the demo scenarios, and the evaluation on real stocks once it has run |
 
 The notebooks are where each part was first tested. The package holds the final version of the same code.
 
@@ -66,6 +67,29 @@ python -m mosaic.cli AAPL --as-of 2026-07-15 --backend anthropic --model claude-
 ```
 
 Filings, prices and news are cached under `data/`, so a second run on the same stock is fast.
+
+**Other ways to run the agents.** `--backend crewai` runs the model-backed agents as CrewAI agents (`pip install -e ".[crew]"`). The tools can also be served as a real MCP server, which any MCP client can call; the forecast-date rule runs inside each tool:
+
+```bash
+pip install -e ".[mcp]"
+python -m mosaic.mcp_server --demo                  # or --ticker AAPL --as-of 2026-07-15
+```
+
+**The guardrail ablation** reruns the nine scenarios with each guardrail switched off in turn, and compares the design with simpler setups. It needs no internet and writes the tables in `results/`:
+
+```bash
+python -m mosaic.ablation
+```
+
+**The evaluation on real stocks** forecasts every Wednesday from July 2026 (after the Claude models' knowledge cutoff) with five variants: baseline, prompt only, baseline with the model's memory, single pass and Tree of Thought. It first asks the model whether it remembers what the stock did, and reports scores with and without those dates. With `--options-dir` pointing at a folder of FirstRate option files, the main score is log loss against the option-implied probabilities:
+
+```bash
+python -m mosaic.evaluate --backend anthropic --model claude-haiku-5-5 \
+  --tickers AAPL,NKE,INTC,MSFT,JPM,XOM --start 2026-07-01 --end 2026-10-15 \
+  --options-dir data/firstrate --resume
+```
+
+Add `--limit 2` for a cheap first try. Results go to `results/evaluation/`, and `--resume` continues an interrupted run.
 
 **In the browser** (a simple Streamlit screen):
 
@@ -93,4 +117,4 @@ python notebooks/build.py notebooks/multi_agent/notebook.src notebooks/multi_age
 
 ## Data
 
-All data is public: SEC EDGAR filings, GDELT news headlines and daily prices. Option prices for scoring come from FirstRate Data and are not included in this repository.
+All data is public: SEC EDGAR filings, GDELT news headlines and daily prices. Option prices for scoring come from FirstRate Data and are licensed, so they are not included in this repository. `mosaic/firstrate.py` reads their files as they come (one file per stock and quarter, plain or zipped). The files have no stock price column, so the price is taken from the daily closes or, failing that, worked out from the option prices themselves (put-call parity).
