@@ -223,8 +223,39 @@ def news_days(as_of: datetime, n: int | None = None) -> list[tuple[datetime, dat
     return days
 
 
-def news_items(company: str, ticker: str, as_of: datetime, gdelt: Gdelt, embed, progress=None) -> list[dict]:
-    """The news stories for one forecast, ready to put in the world."""
+def story_novelty(story: dict, earlier_texts: list[str], embed) -> float:
+    """How new a story is: 1 minus its closest match among earlier headlines and filings, rescaled like filings.
+
+    Similarity of 0.5 or less counts as fully new, 0.95 or more as already known. With nothing earlier to
+    compare with, the answer is unknown and stays at news_novelty (0.5).
+    """
+    if not earlier_texts:
+        return SETTINGS.news_novelty
+    titles = [a["title"] for a in story["articles"]]
+    vecs = np.asarray(embed(titles + earlier_texts), dtype=float)
+    centre = vecs[:len(titles)].mean(axis=0)
+    centre = centre / (np.linalg.norm(centre) or 1.0)
+    sim = float(np.max(vecs[len(titles):] @ centre))
+    lo, hi = SETTINGS.novelty_sim_range
+    return float(min(max((hi - sim) / (hi - lo), 0.0), 1.0))
+
+
+def news_items(company: str, ticker: str, as_of: datetime, gdelt: Gdelt, embed, progress=None,
+               filings: list[dict] | None = None) -> list[dict]:
+    """The news stories for one forecast, ready to put in the world.
+
+    `filings`: the company's filing passages ({"accepted", "text"}); each story's novelty is measured
+    against them and against the headlines seen before it.
+    """
     arts, tone = gdelt.fetch(company, ticker, as_of, progress)
-    return stories_to_items(build_stories(parse_articles(arts, as_of, company, ticker), embed), ticker,
-                            tone_shift(tone, as_of))
+    kept = parse_articles(arts, as_of, company, ticker)
+    stories = build_stories(kept, embed)
+    items = stories_to_items(stories, ticker, tone_shift(tone, as_of))
+    for item, story in zip(items, stories):
+        start = story["first_seen"]
+        mine = {a["title"] for a in story["articles"]}
+        earlier = [a["title"] for a in kept if a["seen"] < start and a["title"] not in mine]
+        earlier += [" ".join(f["text"].split()[:60]) for f in filings or []
+                    if start - timedelta(days=SETTINGS.fresh_days) <= f["accepted"] < start]
+        item["novelty"] = story_novelty(story, earlier, embed)
+    return items

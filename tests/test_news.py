@@ -173,3 +173,28 @@ def test_the_pace_slows_after_a_refusal_and_recovers(tmp_path):
     g._pace = 5.0
     g({"q": 1})
     assert g._pace == 8.0                     # doubled to 10 on the refusal, then x0.8 on the success
+
+
+def test_story_novelty_compares_with_earlier_headlines_and_filings():
+    from mosaic.news import story_novelty
+
+    def embed(texts):                       # two topics: contracts and the chief executive
+        return np.array([[1.0, 0.0] if "contract" in t else [0.0, 1.0] for t in texts])
+
+    story = {"articles": [{"title": "Intel wins contract"}, {"title": "Intel contract with retailer"}]}
+    assert story_novelty(story, [], embed) == 0.5                                    # nothing to compare: unknown
+    assert story_novelty(story, ["Intel CEO steps down"], embed) == 1.0              # a new topic
+    assert story_novelty(story, ["8-K: Intel signs a contract"], embed) == 0.0       # already in a filing
+
+
+def test_news_items_measure_novelty_against_filings_before_the_story(tmp_path):
+    def embed(texts):
+        return np.array([[1.0, 0.0] if "board" in t.lower() else [0.0, 1.0] for t in texts])
+
+    def http(params):
+        return ARTICLES if params["mode"] == "artlist" else {"timeline": []}
+
+    filing = {"accepted": datetime(2026, 3, 1, tzinfo=UTC), "text": "Item 5.02 The board accepted the resignation"}
+    g = Gdelt(tmp_path / "c.json", http_get=http, spacing=0)
+    items = news_items("Intel Corporation", "INTC", AS_OF, g, embed, filings=[filing])
+    assert items and items[0]["novelty"] == 0.0              # the board story was already in the 8-K

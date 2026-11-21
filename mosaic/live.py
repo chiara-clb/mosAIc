@@ -82,7 +82,7 @@ def live_world(ticker: str, as_of: datetime, *, sec_get=None, gdelt: Gdelt | Non
         return rx["bucket"] if rx else None
 
     # News stories, with their price reaction
-    news = news_items(company, ticker, as_of, gdelt, embed, say)
+    news = news_items(company, ticker, as_of, gdelt, embed, say, filings=corpus)
     say(f"News: {len(news)} stories found")
     for n in news:
         n["reaction"] = reaction(n["first_seen"])
