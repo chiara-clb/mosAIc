@@ -99,3 +99,23 @@ What this shows:
 - **Tree of Thought did better than a single pass,** most clearly against what actually happened (Brier 0.650 against 0.680). Comparing readings avoided the first reading's mistakes, as in section 2.
 - **All variants missed a rising market.** Every variant gave a large gain about a 33% chance, while large gains happened in about 60–67% of these weeks and large falls in about 12%.
 - **The test is small** (3 stocks, 8 weeks) and GDELT refused many news requests, so many forecasts had little evidence and the intervals are wide.
+
+## 6. Results day: a demonstration on three releases
+
+`python -m mosaic.results_day --read`, Claude Haiku 5.5, Q2 2026 releases after the close. This is a demonstration of the flow and its guardrails, not an evaluation: three events cannot tell whether the reader helps.
+
+| | Alphabet (GOOGL) | Nvidia (NVDA) | Amazon (AMZN) |
+| --- | --- | --- | --- |
+| Options at the close (B3): fall / flat / gain | 38 / 27 / 36 | 40 / 26 / 34 | 40 / 23 / 37 |
+| MosAIc after the reader | 33 / 24 / 43 | 30 / 22 / 48 | 42 / 23 / 35 |
+| Risk gate | publish | flag (a 13-point shift) | flag (the critic sent a line back) |
+| What happened next day | to add | to add | gain (+14.3%) |
+
+What this shows:
+
+- **The reader separated operating results from one-off items,** such as investment gains, and quoted the release for every line.
+- **The guardrails acted as designed.** On Amazon the critic found a quote that was not in the release and sent it back with the reason, and the corrected line passed. On Nvidia the risk gate flagged a large shift for the analyst.
+- **One event shows the limits.** Amazon rose 14.3%, but the reader weighed negative free cash flow above the AWS beat and leaned slightly towards a fall.
+- **No data leaked.** The leakage audit was clean on all three runs, and the next-day move appears only in the log section marked as after the run.
+
+An earlier prototype of this design, on 40 releases from 2026, scored a log loss of 1.040 against 1.084 for the best baseline (past results-day moves) and 1.102 for the options at the close. The intervals overlap, so this needs more events.
