@@ -12,7 +12,7 @@ and an exact quote from the release. Then, as in the main system:
 
 - **checks in code (the critic)**: every quote must appear in the release, every field must be valid;
   a failed check goes back to the agent once, with the reasons; after that the baseline is reported;
-- **the forecast**: the ledger tilts B3 by a fixed rule (from the earnings-release prototype, MosAIc v2):
+- **the forecast**: the ledger tilts B3 by a fixed rule:
   direction moves probability between a large fall and a large gain, widening moves it out of flat;
 - **the risk gate**: a large move away from the options, a failed check or low confidence is flagged
   for the analyst.
@@ -35,7 +35,7 @@ from mosaic.llm import BudgetError, Model, agent_messages, parse_json
 from mosaic.trace import Trace
 
 STRENGTH = {"weak": 0.5, "moderate": 1.0, "strong": 2.0}
-C_DIRECTION, C_MAGNITUDE = 0.35, 0.25        # the prototype's default constants (no fitted set for this model)
+C_DIRECTION, C_MAGNITUDE = 0.35, 0.25        # fixed by hand; learning them from many releases is a next step
 MIN_WORDS = 3                                # a quote fragment must have at least this many words
 MAX_RELEASE_WORDS = 6000                     # the release text given to the agent is cut here
 FLAG_POINTS = 10.0                           # a move of more than this many points from B3 is flagged
@@ -95,7 +95,7 @@ def quote_in(quote: str, normalised_text: str) -> bool:
 # ---------------------------------------------------------------- consensus
 
 def load_consensus(folder: str | Path, ticker: str, release_day) -> list[dict]:
-    """The consensus values for one release, from the prototype's data/consensus/<TICKER>_<date>.json.
+    """The consensus values for one release, from data/consensus/<TICKER>_<date>.json.
 
     Only metric, provider, value, unit, basis and as-of date are kept: the quotes and links stay out,
     because articles written after the release also carry the actual results.

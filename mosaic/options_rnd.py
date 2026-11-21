@@ -1,6 +1,6 @@
 """The option market's distribution of the next-day move after a results release (baseline B3).
 
-Ported from the earnings-release prototype (MosAIc v2, quant/options_rnd.py). For one release:
+For one release:
 
 1. For each expiry after the release day t0: discount D = exp(-RATE * days / 365), and forward
    F = median of K + (C - P) / D over the ~10 call/put pairs nearest the money (put-call parity:

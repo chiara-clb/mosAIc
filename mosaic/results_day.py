@@ -1,6 +1,5 @@
 """Results day: three baselines for the next-day move after an after-close results release.
 
-A first step towards the earnings-release direction (see the earnings-release prototype, MosAIc v2).
 For a stock that reports after the close on day t0, the question is the move from the close on t0 to
 the close on the next session t1, in three buckets:
 

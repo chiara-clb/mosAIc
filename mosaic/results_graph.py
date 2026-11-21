@@ -12,7 +12,7 @@ and publish / flag / hold nodes:
 - **quant** (code): B1, B2 and B3 from prices before the release and the option quotes at the close.
 - **fetch_release** (code, not an agent): fetches the press release through `get_passage`, under the
   forecast-date rule, and passes it on with the consensus values. A research agent that writes an
-  expectations brief before the release (as in the earnings-release prototype) is a next step.
+  expectations brief before the release is a next step.
 - **reader** (agent, Claude): reads the release against the baselines and the consensus, writes a ledger.
 - **critic** (code): every quote must be in the release; failing lines go back with reasons, at most
   twice; after that they are struck, and if nothing is left the options baseline is reported.
