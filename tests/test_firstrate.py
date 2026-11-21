@@ -189,4 +189,4 @@ def test_no_agent_module_imports_the_answer_key(name):
             imported.update(a.name for a in node.names)
         elif isinstance(node, ast.Import):
             imported.update(a.name.split(".")[-1] for a in node.names)
-    assert not imported & {"answer_key", "firstrate"}
+    assert not imported & {"answer_key", "firstrate", "options_rnd", "results_day"}
