@@ -143,7 +143,10 @@ class Gdelt:
     """GDELT DOC API calls, cached on disk and spaced 5 seconds apart, as GDELT asks."""
 
     def __init__(self, cache_file: str | Path | None = None, http_get: Callable[[dict], dict] | None = None,
-                 spacing: float | None = None, retries: int = 1):
+                 spacing: float | None = None, retries: int = 1, offline: bool | None = None):
+        # Offline: answer only from the saved calls and never ask GDELT (MOSAIC_NEWS_OFFLINE=1), so a
+        # rerun sees the same news as the run that saved them, without waiting on refusals.
+        self.offline = os.environ.get("MOSAIC_NEWS_OFFLINE") == "1" if offline is None else offline
         self.cache_file = Path(cache_file or Path(SETTINGS.data_dir) / "gdelt_cache.json")
         self.cache = self._load()
         self.http_get = http_get or self._requests_get
@@ -185,6 +188,8 @@ class Gdelt:
         key = json.dumps(params, sort_keys=True)
         if key in self.cache:
             return self.cache[key]
+        if self.offline:
+            return {}                                        # not saved: no news, as when GDELT refused it
         error = ""
         for attempt in range(self.retries + 1):
             # The pace adapts: after a refusal every call waits longer (up to 40 s), and it speeds up again

@@ -24,6 +24,7 @@ Results are written to results/evaluation/ after every stock and date, so an int
 from __future__ import annotations
 
 import argparse
+import os
 import csv
 import json
 import math
@@ -370,6 +371,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="mosaic.evaluate", description=__doc__.split("\n\n")[0])
     p.add_argument("--backend", default="anthropic", choices=["anthropic", "hf", "scripted"])
     p.add_argument("--model", default=None)
+    p.add_argument("--news-offline", action="store_true",
+                   help="use only news already saved on disk; never call GDELT")
     p.add_argument("--thinking", choices=["on", "off"], default=None,
                    help="Claude 5 thinking (default: on, or MOSAIC_LLM_THINKING)")
     p.add_argument("--tickers", default=",".join(DEFAULT_TICKERS), help='comma-separated, or "all" for the 30 stocks')
@@ -400,6 +403,8 @@ def main(argv=None) -> int:
     if not dates:
         print("No forecast dates whose 21 trading days have already passed.")
         return 2
+    if a.news_offline:
+        os.environ["MOSAIC_NEWS_OFFLINE"] = "1"              # read by every GDELT client built for this run
     chat, name = make_chat(a.backend, a.model, None if a.thinking is None else a.thinking == "on")
     print(f"{len(tickers)} stocks x {len(dates)} dates ({dates[0]:%Y-%m-%d} to {dates[-1]:%Y-%m-%d}), model {name}.")
     answer_key, unscorable = None, []

@@ -211,3 +211,21 @@ def test_headlines_count_when_they_use_any_usual_name_of_the_company():
     assert names_company("Acme Robotics wins a deal", "Acme Robotics Inc.", "ACME")                # outside the list
     assert news_query("Apple Inc.", "AAPL").startswith('"Apple" (shares')                         # cached queries unchanged
     assert news_query("Alphabet Inc.", "GOOGL").startswith('("Alphabet" OR "Google" OR "YouTube")')
+
+
+def test_offline_news_answers_from_the_saved_calls_and_never_asks_gdelt(tmp_path):
+    from mosaic.news import Gdelt
+    asked = []
+    saved = Gdelt(cache_file=tmp_path / "c.json", http_get=lambda p: asked.append(p) or {"articles": [1]}, spacing=0)
+    saved({"query": "a"})                                         # saved by an earlier online run
+    off = Gdelt(cache_file=tmp_path / "c.json", http_get=lambda p: asked.append(p) or {}, spacing=0, offline=True)
+    assert off({"query": "a"}) == {"articles": [1]} and off({"query": "b"}) == {}
+    assert len(asked) == 1 and off.errors == []
+
+
+def test_offline_news_can_be_set_from_the_environment(monkeypatch, tmp_path):
+    from mosaic.news import Gdelt
+    monkeypatch.setenv("MOSAIC_NEWS_OFFLINE", "1")
+    assert Gdelt(cache_file=tmp_path / "c.json").offline is True
+    monkeypatch.delenv("MOSAIC_NEWS_OFFLINE")
+    assert Gdelt(cache_file=tmp_path / "c.json").offline is False

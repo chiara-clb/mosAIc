@@ -196,3 +196,4 @@ def test_the_results_say_whether_claude_was_thinking():
     assert model_label("claude-haiku-5-5", False) == "claude-haiku-5-5 (thinking off)"
     assert model_label("Qwen/Qwen2.5-3B-Instruct", True) == "Qwen/Qwen2.5-3B-Instruct"
     assert parse_args(["--thinking", "off"]).thinking == "off" and parse_args([]).thinking is None
+    assert parse_args(["--news-offline"]).news_offline and not parse_args([]).news_offline
