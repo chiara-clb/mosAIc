@@ -94,6 +94,8 @@ def results_day(ticker: str, release: datetime, closes: pd.Series, past_releases
         raise ValueError(f"no close for {ticker} on {t0.date()}")
     nxt = sessions[sessions > t0]
     t1 = nxt[0] if len(nxt) else None
+    # Without later prices (the forecast is made right after the release), the next session is the next weekday.
+    t1_for_options = t1 if t1 is not None else t0 + pd.offsets.BDay(1)
     notes = []
 
     moves = []
@@ -117,10 +119,10 @@ def results_day(ticker: str, release: datetime, closes: pd.Series, past_releases
         notes.append(f"daily volatility from {len(daily)} moves, not {LOOKBACK}")
 
     base = {"B1": _pct(buckets_normal(sigma_d, tau)), "B2": _pct(buckets_normal(J, tau)), "B3": None}
-    if chain is not None and len(chain) and t1 is not None:
+    if chain is not None and len(chain):
         from mosaic.options_rnd import next_day_distribution
         try:
-            res = next_day_distribution(chain, t0, t1, tau, sessions.append(
+            res = next_day_distribution(chain, t0, t1_for_options, tau, sessions.append(
                 pd.bdate_range(sessions[-1] + pd.Timedelta(days=1), periods=40)), sigma_d ** 2)
             base["B3"] = _pct(res.probs)
             notes.append("options: " + res.diagnostics["path"])
