@@ -99,6 +99,40 @@ def test_finds_files_by_stock_and_quarter(tmp_path):
     assert set(fr.find_files(tmp_path, "aapl")) == {(2026, 1), (2026, 2)}
 
 
+def test_finds_and_reads_a_stock_inside_a_zip_of_many_stocks(tmp_path):
+    days = [date(2026, 7, 13), date(2026, 7, 14)]
+    big = tmp_path / "2026_q3_option_chain_cr7mic.zip"
+    with zipfile.ZipFile(big, "w") as z:
+        z.writestr("2026_q3/AAPL_2026_q3_option_chain.txt", "\n".join(firstrate_lines(days)))
+        z.writestr("2026_q3/MSFT_2026_q3_option_chain.txt", "\n".join(firstrate_lines(days, spot=400)))
+    files = fr.find_files(tmp_path, "AAPL")
+    assert files == {(2026, 3): (big, "2026_q3/AAPL_2026_q3_option_chain.txt")}
+    chain = fr.chain_before(tmp_path, "AAPL", date(2026, 7, 15))
+    assert sorted(set(chain["quote_date"])) == days
+    assert chain["underlying_price"].iloc[0] == pytest.approx(SPOT, abs=0.05)
+
+
+def test_reads_a_zipped_stock_inside_a_zip_of_many_stocks(tmp_path):
+    inner = tmp_path / "inner.zip"
+    with zipfile.ZipFile(inner, "w") as z:
+        z.writestr("AAPL_2026_q3_option_chain.txt", "\n".join(firstrate_lines([date(2026, 7, 14)])))
+    big = tmp_path / "all" / "2026_q3_option_chain.zip"
+    big.parent.mkdir()
+    with zipfile.ZipFile(big, "w") as z:
+        z.write(inner, "AAPL_2026_q3_option_chain.zip")
+    inner.unlink()
+    files = fr.find_files(tmp_path, "AAPL")
+    assert files[(2026, 3)] == (big, "AAPL_2026_q3_option_chain.zip")
+    assert len(fr.read_firstrate(*files[(2026, 3)])) == len(firstrate_lines([date(2026, 7, 14)]))
+
+
+def test_an_unzipped_copy_wins_over_one_inside_a_zip(tmp_path):
+    with zipfile.ZipFile(tmp_path / "2026_q3_all.zip", "w") as z:
+        z.writestr("AAPL_2026_q3_option_chain.txt", "x")
+    plain = write(tmp_path / "AAPL_2026_q3_option_chain.txt", ["x"])
+    assert fr.find_files(tmp_path, "AAPL")[(2026, 3)] == (plain, None)
+
+
 def test_chain_before_reads_across_a_quarter_boundary(tmp_path):
     q1_days = [date(2026, 3, 30), date(2026, 3, 31)]
     write(tmp_path / "AAPL_2026_q1_option_chain.txt", firstrate_lines(q1_days))

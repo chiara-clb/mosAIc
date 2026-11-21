@@ -6,7 +6,8 @@ FirstRate's end-of-day option files have no header and 16 columns, in this order
     trade date, strike, expiry date, call/put ("c" or "p"), last trade price, bid, ask,
     bid implied volatility, ask implied volatility, open interest, volume,
     delta, gamma, vega, theta, rho
-Files are named like ZUMZ_2025_q1_option_chain.txt, one per stock and quarter, and may come zipped.
+Files are named like ZUMZ_2025_q1_option_chain.txt, one per stock and quarter. They may be zipped on their
+own or sit inside one zip that holds every stock for a quarter (2026_q3_option_chain_xxxx.zip).
 
 There is no column for the stock price, which the answer key needs. It is worked out from the
 option prices themselves (put-call parity): for a strike K, call minus put equals the discounted
@@ -21,6 +22,7 @@ import io
 import math
 import re
 import zipfile
+from functools import lru_cache
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -42,16 +44,31 @@ def _read_text(source) -> pd.DataFrame:
                        dtype={"right": str}, skipinitialspace=True)
 
 
-def read_firstrate(path: str | Path) -> pd.DataFrame:
-    """Read one FirstRate file (.txt or .csv, or a .zip holding them) as a raw table."""
+def _read_zip(z: zipfile.ZipFile, label: str) -> pd.DataFrame:
+    names = [n for n in z.namelist() if n.lower().endswith((".txt", ".csv"))]
+    if not names:
+        raise ValueError(f"{label} holds no .txt or .csv file")
+    return pd.concat([_read_text(io.BytesIO(z.read(n))) for n in sorted(names)], ignore_index=True)
+
+
+def read_firstrate(path: str | Path, member: str | None = None) -> pd.DataFrame:
+    """Read one FirstRate file as a raw table.
+
+    `path` is a .txt or .csv file, or a .zip holding one stock's files. With `member`, `path` is a
+    zip holding many stocks and `member` names the file inside it (itself .txt, .csv or .zip).
+    """
     path = Path(path)
-    if path.suffix.lower() == ".zip":
+    if member is not None:
         with zipfile.ZipFile(path) as z:
-            names = [n for n in z.namelist() if n.lower().endswith((".txt", ".csv"))]
-            if not names:
-                raise ValueError(f"{path.name} holds no .txt or .csv file")
-            parts = [_read_text(io.BytesIO(z.read(n))) for n in sorted(names)]
-        raw = pd.concat(parts, ignore_index=True)
+            data = z.read(member)
+        if member.lower().endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(data)) as inner:
+                raw = _read_zip(inner, member)
+        else:
+            raw = _read_text(io.BytesIO(data))
+    elif path.suffix.lower() == ".zip":
+        with zipfile.ZipFile(path) as z:
+            raw = _read_zip(z, path.name)
     else:
         raw = _read_text(path)
     raw["quote_date"] = pd.to_datetime(raw["quote_date"]).dt.date
@@ -59,7 +76,7 @@ def read_firstrate(path: str | Path) -> pd.DataFrame:
     raw["right"] = raw["right"].str.strip().str.upper().str[0]
     bad = ~raw["right"].isin(["C", "P"])
     if bad.any():
-        raise ValueError(f"{path.name}: {int(bad.sum())} rows are neither calls nor puts; is this a FirstRate option file?")
+        raise ValueError(f"{member or path.name}: {int(bad.sum())} rows are neither calls nor puts; is this a FirstRate option file?")
     return raw
 
 
@@ -119,15 +136,40 @@ def quarter_of(d: date) -> tuple[int, int]:
     return d.year, (d.month - 1) // 3 + 1
 
 
-def find_files(directory: str | Path, ticker: str) -> dict[tuple[int, int], Path]:
-    """FirstRate files for one stock in `directory`, keyed by (year, quarter)."""
-    found = {}
-    for p in Path(directory).rglob("*"):
-        m = FILE_PATTERN.match(p.name)
-        if p.is_file() and m and m["ticker"].upper() == ticker.upper():
+@lru_cache(maxsize=64)
+def _zip_members(path: str, mtime: float) -> tuple[str, ...]:
+    with zipfile.ZipFile(path) as z:
+        return tuple(n for n in z.namelist() if not n.endswith("/"))
+
+
+def find_files(directory: str | Path, ticker: str) -> dict[tuple[int, int], tuple[Path, str | None]]:
+    """FirstRate files for one stock in `directory`, keyed by (year, quarter).
+
+    Each value is (file, None) for a file on disk, or (zip, member) for a file inside a zip that
+    holds many stocks, like FirstRate's 2026_q3_option_chain_xxxx.zip. Subfolders are searched too.
+    An unzipped copy is preferred over a zipped one.
+    """
+    found: dict[tuple[int, int], tuple[Path, str | None]] = {}
+
+    def keep(name: str, source: tuple[Path, str | None], zipped: bool):
+        m = FILE_PATTERN.match(Path(name).name)
+        if m and m["ticker"].upper() == ticker.upper():
             key = (int(m["year"]), int(m["q"]))
-            if key not in found or p.suffix.lower() != ".zip":     # prefer an unzipped copy
-                found[key] = p
+            if key not in found or not zipped:
+                found[key] = source
+
+    for p in sorted(Path(directory).rglob("*")):
+        if not p.is_file():
+            continue
+        if FILE_PATTERN.match(p.name):
+            keep(p.name, (p, None), p.suffix.lower() == ".zip")
+        elif p.suffix.lower() == ".zip":
+            try:
+                members = _zip_members(str(p), p.stat().st_mtime)
+            except zipfile.BadZipFile:
+                continue
+            for n in members:
+                keep(n, (p, n), True)
     return found
 
 
@@ -141,7 +183,7 @@ def chain_before(directory: str | Path, ticker: str, as_of, closes: pd.Series | 
     parts = []
     for key in needed:
         if key in files:
-            raw = read_firstrate(files[key])
+            raw = read_firstrate(*files[key])
             parts.append(raw[(raw["quote_date"] >= first) & (raw["quote_date"] < as_of)])
     if not parts:
         return None
