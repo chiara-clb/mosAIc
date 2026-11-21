@@ -57,12 +57,11 @@ python -m mosaic.cli --demo --backend anthropic     # the demo company with Clau
 
 Each forecast writes `report.md` (probabilities, ledger, review decision), `state.json` and `trace.jsonl` (every step and tool call, with the leakage audit) under `runs/`.
 
-**A real stock** needs internet access, a few extra packages and a contact for the SEC (its rule for automated access):
+**A real stock** needs internet access, a few extra packages, a contact for the SEC (its rule for automated access) and, for Claude, an Anthropic API key. Put the last two in a `.env` file once (copy `.env.example`; git ignores `.env`, so it never reaches GitHub):
 
 ```bash
 pip install -e ".[retrieval,prices,llm]"
-export MOSAIC_SEC_USER_AGENT="Your Name your.email@example.com"
-export ANTHROPIC_API_KEY=...                       # for --backend anthropic
+cp .env.example .env                               # then fill in ANTHROPIC_API_KEY and MOSAIC_SEC_USER_AGENT
 python -m mosaic.cli AAPL --as-of 2026-07-15 --backend anthropic --model claude-haiku-5-5
 ```
 

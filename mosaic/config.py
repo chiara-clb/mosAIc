@@ -9,6 +9,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from mosaic.env import load_env
+
+load_env()          # keys and settings from a .env file, if there is one (never overrides the environment)
+
 # The fixed universe (full design §1): about 3 large-cap US stocks per sector,
 # with liquid options and regular 10-K / 10-Q filings. AAPL, NKE and INTC are kept
 # from the Checkpoint 3 runs so results stay comparable.
