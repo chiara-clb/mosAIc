@@ -97,7 +97,8 @@ STEP_NAMES = {"coordinator": "Coordinator", "quant": "Quant agent", "research": 
               "join": "Waiting for quant and research", "synthesis": "Synthesis agent (Tree of Thought)",
               "critic": "Critic", "finalise": "Finalising the forecast", "fallback": "Falling back to the baseline",
               "risk_gate": "Risk gate", "publish": "Published", "reader": "Release reader",
-              "release_reader": "Release reader", "release_research": "Research (release)",
+              "release_reader": "Release reader", "fetch_release": "Fetching the release (code)",
+              "release_fetch": "Fetching the release (code)",
               "release_critic": "Critic", "flag": "Published with a flag",
               "hold": "Held for the analyst"}
 

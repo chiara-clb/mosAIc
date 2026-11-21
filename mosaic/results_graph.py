@@ -3,14 +3,16 @@
 The same structure as the monthly forecast (mosaic/graph.py), with the same tool door, wrapper, risk gate
 and publish / flag / hold nodes:
 
-    coordinator -> quant and coordinator -> research        (in parallel)
-    [quant, research] -> reader                            (waits for both)
+    coordinator -> quant and coordinator -> fetch_release   (in parallel)
+    [quant, fetch_release] -> reader                       (waits for both)
     reader -> critic -> finalise | reader | fallback       (sent back with reasons, at most twice)
     finalise and fallback -> risk gate -> publish | flag | hold
 
 - **coordinator** (code): confirms through `market_data` that the release came after the close.
 - **quant** (code): B1, B2 and B3 from prices before the release and the option quotes at the close.
-- **research** (code): fetches the press release through `get_passage`, under the forecast-date rule.
+- **fetch_release** (code, not an agent): fetches the press release through `get_passage`, under the
+  forecast-date rule, and passes it on with the consensus values. A research agent that writes an
+  expectations brief before the release (as in the earnings-release prototype) is a next step.
 - **reader** (agent, Claude): reads the release against the baselines and the consensus, writes a ledger.
 - **critic** (code): every quote must be in the release; failing lines go back with reasons, at most
   twice; after that they are struck, and if nothing is left the options baseline is reported.
@@ -44,10 +46,10 @@ FORECAST_DELAY = timedelta(minutes=15)                     # the forecast is mad
 
 ROLES = {
     **READER_ROLE,
-    "release_research": {
-        "role": "Release researcher",
+    "release_fetch": {
+        "role": "Release fetcher (code step, not an agent)",
         "goal": "Fetch the results press release and the analysts' consensus for the reader.",
-        "backstory": "You collect documents; you do not judge them.",
+        "backstory": "Plain code: it collects documents and judges nothing.",
         "tools": ["get_passage"], "kind": "code", "sees": "the release, published before the forecast moment"},
     "release_critic": {
         "role": "Critic",
@@ -104,16 +106,16 @@ def quant(state: dict, run: A.Run) -> dict:
             (" / ".join(f"{k} {v:.0f}%" for k, v in b3.items()) if b3 else "missing: " + "; ".join(rd.notes))}
 
 
-def research(state: dict, run: A.Run) -> dict:
+def fetch_release(state: dict, run: A.Run) -> dict:
     req, w = state["request"], run.tools.world
     try:
-        doc = run.tools.call("get_passage", "release_research", item_id=req["release_id"])
+        doc = run.tools.call("get_passage", "release_fetch", item_id=req["release_id"])
     except ToolError as exc:
-        return {"error": [f"research: {exc}"], "_note": str(exc)}
+        return {"error": [f"fetch_release: {exc}"], "_note": str(exc)}
     if doc is None:
-        return {"error": ["research: the release is not available before the forecast moment"],
+        return {"error": ["fetch_release: the release is not available before the forecast moment"],
                 "_note": "release not available"}
-    run.tools.trace.add("release_research", "source_used", source=doc["id"], published=doc["published"])
+    run.tools.trace.add("release_fetch", "source_used", source=doc["id"], published=doc["published"])
     consensus = w.extra.get("consensus") or []
     evidence = [{"id": doc["id"], "kind": "release", "published": doc["published"],
                  "header": f"{req['company']} | 8-K | Exhibit 99.1 press release", "covered_by": [],
@@ -217,7 +219,7 @@ def results_risk_gate(state: dict, run: A.Run) -> dict:
     return out
 
 
-NODES = {"coordinator": coordinator, "quant": quant, "research": research, "reader": reader, "critic": critic,
+NODES = {"coordinator": coordinator, "quant": quant, "fetch_release": fetch_release, "reader": reader, "critic": critic,
          "finalise": finalise, "fallback": fallback, "risk_gate": results_risk_gate,
          "publish": publish, "flag": flag, "hold": hold}
 
@@ -229,8 +231,8 @@ def build_results_graph(run: A.Run, engine=None):
         g.add_node(name, as_node(name, fn, run))
     g.add_edge(START, "coordinator")
     g.add_edge("coordinator", "quant")                  # parallel fan-out
-    g.add_edge("coordinator", "research")
-    g.add_edge(["quant", "research"], "reader")         # waits for both
+    g.add_edge("coordinator", "fetch_release")
+    g.add_edge(["quant", "fetch_release"], "reader")    # waits for both
     g.add_edge("reader", "critic")
     g.add_conditional_edges("critic", route_after_critic,
                             {"finalise": "finalise", "reader": "reader", "fallback": "fallback"})

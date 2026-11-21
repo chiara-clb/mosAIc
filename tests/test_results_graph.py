@@ -40,14 +40,14 @@ def test_the_full_flow_reads_checks_and_forecasts(engine):
     events = []
     state, run = run_results_day(world(), scripted(good()), engine=engine, on_event=events.append)
     steps = [t["node"] for t in state["trace"]]
-    assert steps[0] == "coordinator" and set(steps[1:3]) == {"quant", "research"}
+    assert steps[0] == "coordinator" and set(steps[1:3]) == {"quant", "fetch_release"}
     assert steps[3:] == ["reader", "critic", "finalise", "risk_gate", steps[-1]]
     final = state["final"]
     assert final["status"].startswith("accepted") and final["probabilities"]["gain"] > final["baseline"]["gain"]
     assert final["review"] in ("flag", "hold") and any("high impact" in t for t in final["triggers"])
     assert run_facts(state, run)["leakage"] == "clean"
     tools = [(c["node"], c["tool"], c["status"]) for c in run.tools.calls]
-    assert ("release_research", "get_passage", "ok") in tools and ("release_critic", "get_passage", "ok") in tools
+    assert ("release_fetch", "get_passage", "ok") in tools and ("release_critic", "get_passage", "ok") in tools
     assert any(progress_line(e) == "Release reader: working…" for e in events)
 
 
