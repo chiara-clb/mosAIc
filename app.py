@@ -53,6 +53,12 @@ def outcome_chart(table: pd.DataFrame):
             .properties(height=260))
 
 
+@st.cache_data(show_spinner="Reading the stock's results releases from the SEC…")
+def release_choices_cached(ticker: str, options_dir: str) -> list[dict]:
+    from mosaic.results_day import live_release_choices
+    return live_release_choices(ticker, options_dir or None)
+
+
 # --- what to run --------------------------------------------------------------------------------
 with st.sidebar:
     st.header("Forecast")
@@ -61,13 +67,29 @@ with st.sidebar:
                          "a first step towards forecasting right after results.")
     if mode.startswith("Results"):
         rd_ticker = st.selectbox("Stock", sorted(UNIVERSE), index=sorted(UNIVERSE).index("AMZN"))
-        rd_day = st.date_input("Release day (reported after the close)", date(2026, 7, 30))
         rd_options = st.text_input("Folder of FirstRate option files", "data/firstrate")
+        rd_day, listed = None, True
+        try:
+            choices = release_choices_cached(rd_ticker, rd_options)
+        except Exception as exc:                                 # no SEC access: say so instead of a stack trace
+            choices, listed = [], False
+            st.error(f"Could not list {rd_ticker}'s results releases: {exc}")
+        if choices:
+            with_options = [i for i, c in enumerate(choices) if c["options"]]
+            pick = st.selectbox("Results release (after the close)", range(len(choices)),
+                                index=with_options[0] if with_options else 0,
+                                format_func=lambda i: choices[i]["label"],
+                                help="The stock's results releases made after the 16:00 New York close, from its "
+                                     "SEC filings. B3 needs option prices for that day.")
+            rd_day = choices[pick]["day"]
+        elif listed:
+            st.info(f"{rd_ticker} has no results released after the close since 2023 (it may report before the "
+                    "market opens). This view covers after-close releases.")
         rd_consensus = st.text_input("Folder of consensus estimates", "data/consensus")
         rd_model = st.text_input("Claude model for the release reader", "claude-haiku-5-5")
         if not os.environ.get("ANTHROPIC_API_KEY"):
             st.warning("ANTHROPIC_API_KEY is not set: the baselines work, the release reader does not.")
-        rd_go = st.button("Show the baselines", type="primary")
+        rd_go = st.button("Show the baselines", type="primary", disabled=rd_day is None)
         go = False
     else:
         rd_go = False
@@ -106,8 +128,8 @@ if mode.startswith("Results"):
     rd = st.session_state.get("rd")
     reading = st.session_state.get("reading")
     if rd is None:
-        st.info("Choose a stock and the day it reported after the close, for example AMZN 2026-07-30, "
-                "NVDA 2026-08-26 or GOOGL 2026-07-22, and press **Show the baselines**.")
+        st.info("Choose a stock and one of its results releases, for example AMZN 2026-07-30, NVDA 2026-08-26 "
+                "or GOOGL 2026-07-22, and press **Show the baselines**.")
         st.stop()
     st.markdown(f"**{rd.ticker}** reported at **{rd.release.astimezone(NEW_YORK):%H:%M} New York time** on "
                 f"{rd.t0}. A large move is beyond **±{rd.tau * 100:.1f}%** "
