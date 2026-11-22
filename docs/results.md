@@ -1,6 +1,6 @@
 # Results so far
 
-Sections 1 to 3 come from the three notebooks, section 4 from `python -m mosaic.ablation` and section 5 from `python -m mosaic.evaluate`. Sections 1 to 4 do not use the option-implied answer key yet, so forecasts are scored against what actually happened (Brier score: lower is better). The answer-key scoring will be added once the option data is loaded.
+Sections 1 to 3 come from the three notebooks, section 4 from `python -m mosaic.ablation` and section 5 from `python -m mosaic.evaluate`. Sections 1 and 2 score forecasts against what actually happened (Brier score, lower is better). Sections 3 and 4 use a made-up company and a scripted model, so they test the guardrails, not forecasting skill. Section 5 is the main evaluation. It scores forecasts against the probabilities implied by option prices on the forecast date, and also against what actually happened. Section 6 is a demonstration of results day on three releases.
 
 ## 1. Which baseline
 
