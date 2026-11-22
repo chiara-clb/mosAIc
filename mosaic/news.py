@@ -224,13 +224,12 @@ class Gdelt:
         call over two weeks only reaches back a day or so, so each day is a separate call. Days are
         whole UTC days, so the calls are cached and shared by forecasts on nearby dates.
         """
-        q, fmt = news_query(company, ticker), "%Y%m%d%H%M%S"
+        q = news_query(company, ticker)
         articles, seen_urls = [], set()
         days = news_days(as_of)
         self.progress = progress
         for n, (start, end) in enumerate(days, 1):
-            params = {"query": q, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
-                      "startdatetime": start.strftime(fmt), "enddatetime": end.strftime(fmt)}
+            params = day_params(q, start, end)
             if progress:
                 saved = json.dumps(params, sort_keys=True) in self.cache
                 progress(f"News: {start:%d %b} ({n} of {len(days)} days, {'saved' if saved else 'downloading'})")
@@ -240,10 +239,24 @@ class Gdelt:
                 if key not in seen_urls:
                     seen_urls.add(key)
                     articles.append(a)
-        tone = self({"query": q, "mode": "timelinetone", "format": "json",
-                     "startdatetime": (as_of - timedelta(days=SETTINGS.news_days + SETTINGS.tone_base_days)).strftime(fmt),
-                     "enddatetime": as_of.strftime(fmt)})
+        tone = self(tone_params(q, as_of))
         return {"articles": articles}, tone
+
+
+GDELT_TIME = "%Y%m%d%H%M%S"
+
+
+def day_params(query: str, start: datetime, end: datetime) -> dict:
+    """The GDELT call for one day of headlines (also the key it is cached under)."""
+    return {"query": query, "mode": "artlist", "format": "json", "maxrecords": 250, "sort": "datedesc",
+            "startdatetime": start.strftime(GDELT_TIME), "enddatetime": end.strftime(GDELT_TIME)}
+
+
+def tone_params(query: str, as_of: datetime) -> dict:
+    """The GDELT call for the tone timeline before a forecast date."""
+    return {"query": query, "mode": "timelinetone", "format": "json",
+            "startdatetime": (as_of - timedelta(days=SETTINGS.news_days + SETTINGS.tone_base_days)).strftime(GDELT_TIME),
+            "enddatetime": as_of.strftime(GDELT_TIME)}
 
 
 def news_days(as_of: datetime, n: int | None = None) -> list[tuple[datetime, datetime]]:
