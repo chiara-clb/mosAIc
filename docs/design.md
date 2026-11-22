@@ -36,7 +36,7 @@ Retrieval follows the dense passage retrieval and MMR labs, with the forecast da
 | Nothing found | Below this score the search answers "nothing relevant", and the research agent rephrases | 0.20 (0.30 lost most real evidence) |
 | Every filing counts | Each filing in the window is also a candidate on its own, through its passage closest to the filing's own subject, so short 8-Ks are not missed | One passage per filing |
 | What the agents see | The research agent sees a header and a cleaned extract. The synthesis agent reads the full passage, one item at a time, with no search tools | 40-word extract, instruction-like sentences removed |
-| News | GDELT headlines that name the company, grouped into stories by meaning. A story within a few days of a filing on the same topic becomes coverage of that filing, so it is not counted twice | A story needs 2 or more headlines; 3-day link |
+| News | GDELT headlines that name the company, grouped into stories by meaning. Where saved Wayback news exists (Amazon, Alphabet, Nvidia and others before their results), both sources are used, each link once. A story within a few days of a filing on the same topic becomes coverage of that filing, so it is not counted twice | A story needs 2 or more headlines; 3-day link |
 | Novelty | Each passage is compared with the same section of the company's previous filing | Similarity 0.5 or less is new, 0.95 or more is repeated |
 
 The settings come from Checkpoint 3 tests on Apple: a plain top five held 2.6 near-copy pairs per query, and MMR at λ = 0.7 cut this to 0.2 for 3% less relevance. A pool of 10 candidates worked as well as 20.
@@ -94,4 +94,5 @@ Consensus values (metric, provider, value) are given to the reader. The provider
 - Tree of Thought scores readings with per-stock base rates, which rest on few past events. With thinking on, a single pass does as well.
 - The quote check confirms a quote exists, not that it means anything. A boilerplate check now prunes exhibit references, vote tallies and similar text, which made up 45% of the tree's chosen lines in the 47-forecast run. Its patterns come from that run, so they need checking on new filings.
 - The language models used by the live system may remember 2025 and early 2026 events, so their evaluation uses dates after their knowledge cutoff.
+- News for Amazon, Alphabet and Nvidia in the 47-forecast run came only from archived web pages: about a dozen articles per stock, from the week before results. Their monthly forecasts rest on very little news. GDELT headlines can now be downloaded for them (`mosaic.news_download`).
 - Results day has been run on three releases as a demonstration only, with shift sizes fixed by hand. It needs an evaluation on many releases, which would also let the shift sizes be learned.

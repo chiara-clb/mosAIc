@@ -120,6 +120,15 @@ Useful options:
 
 - `--limit 2` for a cheap first try, and `--resume` to continue an interrupted run.
 - `--news-offline` uses only news already saved on disk and never calls GDELT, so a rerun sees the same news and does not wait on refused requests.
+
+GDELT refuses calls that come too fast. To save its headlines in advance, slowly, for a few stocks (it can be stopped and restarted, and saved days are skipped):
+
+```bash
+python -m mosaic.news_download --tickers AMZN,GOOGL,NVDA --start 2026-07-01 --end 2026-08-19 \
+  --also 2026-07-08,2026-07-30 --spacing 15
+```
+
+Where saved Wayback news also exists, forecasts use both sources together.
 - `--thinking off` reproduces the first run, without thinking.
 - `--variants "baseline,5 single passes"` runs a sixth variant on its own: one research step, then the single pass five times, averaged. It checks whether Tree of Thought adds more than repeating and averaging.
 
