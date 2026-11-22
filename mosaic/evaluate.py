@@ -8,6 +8,8 @@ builds the world once and produces five forecasts:
 - baseline + memory:   the model adjusts the baseline from what it already knows, with no evidence
 - single pass:         the full system, first reading of each item
 - ToT:                 the full system as designed (Tree of Thought, critic with reasons)
+- 5 single passes:     (only when asked for) one research, then the single pass five times, averaged;
+                       the fair check of whether Tree of Thought adds more than repeating and averaging
 
 Before forecasting, a memory check asks the model what the stock did over the following month. If it
 claims to know, the date is flagged (or dropped), because then the model could be remembering the answer.
@@ -45,6 +47,9 @@ from mosaic.scoring import brier, compare, log_loss_implied
 UTC = timezone.utc
 DEFAULT_TICKERS = ["AAPL", "NKE", "INTC", "MSFT", "JPM", "XOM"]
 VARIANTS = ["baseline", "prompt only", "baseline + memory", "single pass", "ToT"]
+AVERAGED = "5 single passes"
+ALL_VARIANTS = VARIANTS[:4] + [AVERAGED] + VARIANTS[4:]    # the default run keeps VARIANTS
+REPEATS = 5
 FIXED_GUESS = {"fall": 30.85, "flat": 38.3, "gain": 30.85}
 CUTOFF = "2026-07-01"                     # after the Claude models' reliable knowledge cutoff (June 2026)
 OUT_DIR = Path("results") / "evaluation"
@@ -190,6 +195,19 @@ def evaluate_one(ticker: str, as_of: datetime, chat: Chat, model_name: str, *, w
             state, _ = run_forecast(world, m, options={"protocol": "two_way", "readings": "single"}, engine=engine)
             base = base or state["final"]["baseline"]
             add("single pass", state["final"]["probabilities"], state["final"]["status"], state["final"].get("review", ""), m.calls)
+        if AVERAGED in variants:
+            memo, finals, calls = {}, [], 0
+            for _ in range(REPEATS):
+                m = Model(chat, None, model_name)
+                state, _ = run_forecast(world, m, options={"protocol": "two_way", "readings": "single"},
+                                        engine=engine, research_memo=memo)
+                finals.append(state["final"])
+                calls += m.calls
+            base = base or finals[0]["baseline"]
+            probs = {k: float(np.mean([f["probabilities"][k] for f in finals])) for k in OUTCOMES}
+            kinds = sorted({f["status"].split(",")[0] for f in finals})
+            held = sum(f.get("review") == "hold" for f in finals)
+            add(AVERAGED, probs, f"average of {REPEATS} ({', '.join(kinds)})", f"{held} of {REPEATS} held", calls)
         if "baseline" in variants:
             add("baseline", base, "ok")
         if "prompt only" in variants:
@@ -200,7 +218,7 @@ def evaluate_one(ticker: str, as_of: datetime, chat: Chat, model_name: str, *, w
             m = Model(chat, 3, model_name)
             p, status = baseline_plus_memory(m, world.company, ticker, as_of, base)
             add("baseline + memory", p, status, calls=m.calls)
-        order = {v: i for i, v in enumerate(VARIANTS)}
+        order = {v: i for i, v in enumerate(ALL_VARIANTS)}
         return sorted(rows, key=lambda r: order.get(r["variant"], 99))
     except Exception as exc:                                    # one bad stock or date must not stop the run
         return [{**base_row, "variant": v, "status": "error", "error": f"{type(exc).__name__}: {exc}"} for v in variants]
@@ -275,7 +293,7 @@ def summary_table(table: pd.DataFrame, include_flagged: bool = True, n_boot: int
     s = scored(table, include_flagged)
     metrics = ["log_loss_implied", "log_loss_outcome", "brier_outcome"]
     rows = []
-    for v in [v for v in VARIANTS if v in set(s["variant"])]:
+    for v in [v for v in ALL_VARIANTS if v in set(s["variant"])]:
         part = s[s["variant"] == v]
         row = {"variant": v, "forecasts": len(part), "model calls (mean)": round(float(part["model_calls"].fillna(0).mean()), 1)}
         for m in metrics:
@@ -296,7 +314,7 @@ def calibration_table(table: pd.DataFrame, include_flagged: bool = True) -> pd.D
     """For each variant and outcome: forecasts grouped by stated probability, and how often the outcome happened."""
     s = scored(table, include_flagged)
     rows = []
-    for v in [v for v in VARIANTS if v in set(s["variant"])]:
+    for v in [v for v in ALL_VARIANTS if v in set(s["variant"])]:
         part = s[s["variant"] == v]
         for k in OUTCOMES:
             bins = pd.cut(part[k], CAL_BINS, right=False)
@@ -396,8 +414,8 @@ def main(argv=None) -> int:
         print(f"Not in the universe: {', '.join(unknown)}")
         return 2
     variants = [v.strip() for v in a.variants.split(",") if v.strip()]
-    if bad := [v for v in variants if v not in VARIANTS]:
-        print(f"Unknown variants: {bad}. Choose from: {', '.join(VARIANTS)}")
+    if bad := [v for v in variants if v not in ALL_VARIANTS]:
+        print(f"Unknown variants: {bad}. Choose from: {', '.join(ALL_VARIANTS)}")
         return 2
     dates = forecast_dates(a.start, a.end or datetime.now(UTC).date().isoformat())
     if not dates:

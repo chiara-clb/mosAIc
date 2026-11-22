@@ -197,3 +197,18 @@ def test_the_results_say_whether_claude_was_thinking():
     assert model_label("Qwen/Qwen2.5-3B-Instruct", True) == "Qwen/Qwen2.5-3B-Instruct"
     assert parse_args(["--thinking", "off"]).thinking == "off" and parse_args([]).thinking is None
     assert parse_args(["--news-offline"]).news_offline and not parse_args([]).news_offline
+
+
+def test_five_single_passes_share_one_research_and_are_averaged():
+    rows = E.evaluate_one("AAPL", DATES[0], chat(), "scripted", world_factory=fake_world, price_source=fake_prices,
+                          answer_key=fake_key, variants=["single pass", E.AVERAGED])
+    by = {r["variant"]: r for r in rows}
+    avg = by[E.AVERAGED]
+    assert avg["status"].startswith("average of 5") and avg["review"].endswith("of 5 held")
+    assert sum(avg[k] for k in ("fall", "flat", "gain")) == pytest.approx(100, abs=0.1)
+    assert 0 < avg["model_calls"] < 5 * by["single pass"]["model_calls"]      # research ran once, not five times
+
+
+def test_the_averaged_variant_runs_only_when_asked_for():
+    assert E.AVERAGED not in E.VARIANTS and E.AVERAGED in E.ALL_VARIANTS
+    assert E.parse_args(["--variants", f"baseline,{E.AVERAGED}"]).variants == f"baseline,{E.AVERAGED}"
