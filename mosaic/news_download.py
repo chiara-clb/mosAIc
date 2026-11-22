@@ -7,7 +7,7 @@ on any date in the range finds its news, plus the tone timeline for each Wednesd
 Stopping and restarting is safe: saved days are skipped.
 
     python -m mosaic.news_download --tickers AMZN,GOOGL,NVDA --start 2026-07-01 --end 2026-08-19 \
-        --also 2026-07-08,2026-07-30 --spacing 15
+        --also 2026-07-30 --spacing 20
 
 Afterwards, run with MOSAIC_NEWS_OFFLINE=1 to use only what was saved.
 """
@@ -20,6 +20,9 @@ from datetime import UTC, date, datetime, timedelta
 
 from mosaic.config import SETTINGS
 from mosaic.news import Gdelt, day_params, news_query, tone_params
+
+STOP_AFTER = 3          # days in a row refused: GDELT is blocking, so stop and try again later
+RETRIES = 3             # per day, after waiting 1, 2 and 4 minutes
 
 
 def news_days_between(start: date, end: date) -> list[tuple[datetime, datetime]]:
@@ -50,7 +53,7 @@ def download(tickers: list[str], start: date, end: date, gdelt: Gdelt, also: lis
     for ticker in tickers:
         q = news_query(ticker, ticker)
         days = news_days_between(start, end)
-        articles, failed = 0, 0
+        articles, failed, in_a_row = 0, 0, 0
         for n, (s, e) in enumerate(days, 1):
             params = day_params(q, s, e)
             saved = json.dumps(params, sort_keys=True) in gdelt.cache
@@ -62,9 +65,16 @@ def download(tickers: list[str], start: date, end: date, gdelt: Gdelt, also: lis
                              "stopped": "invalid search"})
                 return rows
             failed += len(gdelt.errors) > before
+            in_a_row = in_a_row + 1 if len(gdelt.errors) > before else 0
             articles += got
             status = "saved" if saved else ("failed, run again later" if len(gdelt.errors) > before else "downloaded")
             log(f"{ticker} {s:%Y-%m-%d} ({n} of {len(days)}): {got} headlines, {status}")
+            if in_a_row >= STOP_AFTER:
+                log(f"{STOP_AFTER} days in a row were refused, so GDELT is blocking for now. Stopping. "
+                    "Wait 30 minutes or more and run the same command again: saved days are skipped.")
+                rows.append({"ticker": ticker, "days": n, "headlines": articles, "failed calls": failed,
+                             "stopped": "refused"})
+                return rows
         for t in tone_dates(start, end, also):
             before = len(gdelt.errors)
             gdelt(tone_params(q, t))
@@ -79,11 +89,11 @@ def main(argv=None) -> None:  # pragma: no cover - needs internet
     p.add_argument("--start", required=True, help="first forecast date, YYYY-MM-DD")
     p.add_argument("--end", required=True, help="last forecast date, YYYY-MM-DD")
     p.add_argument("--also", default="", help="other forecast dates for the tone timeline, e.g. 2026-07-30")
-    p.add_argument("--spacing", type=float, default=15.0, help="seconds between calls (GDELT asks for at least 5)")
+    p.add_argument("--spacing", type=float, default=20.0, help="seconds between calls (GDELT asks for at least 5)")
     a = p.parse_args(argv)
     tickers = [t.strip().upper() for t in a.tickers.split(",") if t.strip()]
     also = [date.fromisoformat(x.strip()) for x in a.also.split(",") if x.strip()]
-    gdelt = Gdelt(spacing=a.spacing, offline=False)
+    gdelt = Gdelt(spacing=a.spacing, retries=RETRIES, offline=False)
     gdelt.progress = print
     rows = download(tickers, date.fromisoformat(a.start), date.fromisoformat(a.end), gdelt, also)
     print("\nSummary")

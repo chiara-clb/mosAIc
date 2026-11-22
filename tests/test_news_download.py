@@ -80,3 +80,38 @@ def test_an_invalid_search_stops_the_download_at_once(tmp_path):
     lines = []
     rows = download(["AMZN", "NVDA"], date(2026, 7, 1), date(2026, 7, 15), g, log=lines.append)
     assert len(calls) == 1 and rows[-1]["stopped"] == "invalid search" and "Stopping" in lines[-1]
+
+
+def test_waits_double_after_each_refusal(tmp_path, monkeypatch):
+    waits, calls = [], []
+    monkeypatch.setattr(news.time, "sleep", waits.append)
+
+    def refuse(params):
+        calls.append(1)
+        raise RuntimeError("429 Client Error: Too Many Requests")
+
+    g = Gdelt(tmp_path / "c.json", http_get=refuse, spacing=20, retries=3, offline=False)
+    g({"mode": "artlist", "query": "x"})
+    assert len(calls) == 4 and [round(w, -1) for w in waits] == [60, 120, 240]
+
+
+def test_the_download_stops_after_three_refused_days_in_a_row(tmp_path):
+    calls = []
+
+    def refuse(params):
+        calls.append(params)
+        raise RuntimeError("429 Client Error: Too Many Requests")
+
+    g = Gdelt(tmp_path / "c.json", http_get=refuse, spacing=0, retries=0, offline=False)
+    lines = []
+    rows = download(["AMZN", "NVDA"], date(2026, 7, 1), date(2026, 7, 15), g, log=lines.append)
+    assert len(calls) == 3 and rows == [{"ticker": "AMZN", "days": 3, "headlines": 0, "failed calls": 3,
+                                         "stopped": "refused"}]
+    assert "run the same command again" in lines[-1]
+
+
+def test_one_refused_day_between_good_ones_does_not_stop_it(tmp_path):
+    calls = []
+    g = Gdelt(tmp_path / "c.json", http_get=fake(calls, refuse={"20260626"}), spacing=0, retries=0, offline=False)
+    rows = download(["AMZN"], date(2026, 7, 1), date(2026, 7, 1), g, log=lambda m: None)
+    assert rows[0]["failed calls"] == 1 and "stopped" not in rows[0]

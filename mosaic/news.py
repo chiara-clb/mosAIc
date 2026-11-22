@@ -148,7 +148,8 @@ class Gdelt:
     """GDELT DOC API calls, cached on disk and spaced 5 seconds apart, as GDELT asks."""
 
     def __init__(self, cache_file: str | Path | None = None, http_get: Callable[[dict], dict] | None = None,
-                 spacing: float | None = None, retries: int = 1, offline: bool | None = None):
+                 spacing: float | None = None, retries: int = 1, offline: bool | None = None,
+                 first_wait: float = 60.0):
         # Offline: answer only from the saved calls and never ask GDELT (MOSAIC_NEWS_OFFLINE=1), so a
         # rerun sees the same news as the run that saved them, without waiting on refusals.
         self.offline = os.environ.get("MOSAIC_NEWS_OFFLINE") == "1" if offline is None else offline
@@ -157,6 +158,7 @@ class Gdelt:
         self.http_get = http_get or self._requests_get
         self.spacing = SETTINGS.gdelt_spacing_seconds if spacing is None else spacing
         self.retries = retries
+        self.first_wait = first_wait          # wait before the first retry; it doubles for each further one
         self._pace = self.spacing                 # current seconds between calls; grows after refusals
         self.errors: list[str] = []          # failed calls in this session, so a run can say news was missing
         self.progress = None                  # optional callable(message), told about refusals and waits
@@ -198,8 +200,10 @@ class Gdelt:
         error = ""
         for attempt in range(self.retries + 1):
             # The pace adapts: after a refusal every call waits longer (up to 40 s), and it speeds up again
-            # as calls succeed. A refused call is retried once after 60 s, then skipped for a later run.
-            wait = (self._pace if attempt == 0 else max(60.0 * attempt, self._pace)) - (time.time() - self._last)
+            # as calls succeed. A refused call is retried after 60 s (then 120, 240, ... if more retries are
+            # allowed), then skipped for a later run.
+            backoff = self.first_wait * 2 ** (attempt - 1) if attempt else 0.0
+            wait = (self._pace if attempt == 0 else max(backoff, self._pace)) - (time.time() - self._last)
             if attempt and self.progress:
                 self.progress(f"   GDELT refused ({error[:60]}); waiting {max(wait, 0):.0f} s, "
                               f"attempt {attempt + 1} of {self.retries + 1}")

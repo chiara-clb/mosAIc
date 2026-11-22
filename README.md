@@ -125,7 +125,7 @@ GDELT refuses calls that come too fast. To save its headlines in advance, slowly
 
 ```bash
 python -m mosaic.news_download --tickers AMZN,GOOGL,NVDA --start 2026-07-01 --end 2026-08-19 \
-  --also 2026-07-08,2026-07-30 --spacing 15
+  --also 2026-07-30 --spacing 20
 ```
 
 Where saved Wayback news also exists, forecasts use both sources together.
