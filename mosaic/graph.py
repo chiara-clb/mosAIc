@@ -120,11 +120,12 @@ def build_graph(run: A.Run, engine=None):
 
 
 def run_forecast(world: World, model: Model, failures=(), options: dict | None = None, engine=None,
-                 on_event=None):
+                 on_event=None, research_memo: dict | None = None):
     """One forecast, start to finish. Returns (final state, run).
 
     `on_event(event)` is called live with every trace event and every "agent started" notice,
-    so a screen can show where the run is.
+    so a screen can show where the run is. Runs given the same `research_memo` dict share the first
+    run's research (used to repeat the synthesis on the same evidence).
     """
     trace = Trace(run_id=f"{world.ticker}-{world.as_of:%Y-%m-%d}", as_of=world.as_of)
     if on_event:
@@ -132,6 +133,7 @@ def run_forecast(world: World, model: Model, failures=(), options: dict | None =
     run = A.Run(ToolBox(world, trace=trace, failures=failures), model,
                 {"protocol": "two_way", "readings": "tot", **(options or {})})
     run.tools.off = set(run.options.get("guardrails_off", ()))
+    run.research_memo = research_memo
     trace.add("run", "start", ticker=world.ticker, as_of=world.as_of.isoformat(), model=model.name,
               engine=(engine or graph_engine())[3], options=run.options)
     graph = build_graph(run, engine)

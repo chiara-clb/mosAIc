@@ -7,6 +7,7 @@ The graph (mosaic/graph.py) decides the order.
 
 from __future__ import annotations
 
+import copy
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -27,6 +28,7 @@ class Run:
     tools: ToolBox
     model: Model
     options: dict = field(default_factory=lambda: {"protocol": "two_way", "readings": "tot"})
+    research_memo: dict | None = None     # shared by repeated runs on one world: the first research is reused
 
     def ask(self, agent: str, task: str, payload: dict, max_tokens: int = 300) -> dict | None:
         raw = self.model(agent_messages(agent, task, payload, self.tools.extra_roles), max_tokens)
@@ -131,6 +133,21 @@ def one_per_filing(items: list[dict], tools: ToolBox, as_of=None) -> list[dict]:
 
 
 def research(state: dict, run: Run, agent: str = "research", full_text: bool = False) -> dict:
+    """The research agent. With a research memo, the first research of a stock and date is saved and
+    later runs reuse it, so repeated synthesis passes see the same evidence. A second round asked for
+    by the critic (it comes with hints) always runs live."""
+    memo = run.research_memo
+    first = memo is not None and agent == "research" and not state.get("hints") and not state.get("evidence")
+    if first and "update" in memo:
+        run.tools.trace.add(agent, "reused", note="research reused from the first pass")
+        return {**copy.deepcopy(memo["update"]), "_note": "reused the research of the first pass"}
+    update = _research(state, run, agent, full_text)
+    if first and not update.get("error"):
+        memo["update"] = copy.deepcopy(update)
+    return update
+
+
+def _research(state: dict, run: Run, agent: str = "research", full_text: bool = False) -> dict:
     req, tools = state["request"], run.tools
     hints = list(state.get("hints") or [])
     pool = {e["id"]: {**e, "coverage": []} for e in state.get("evidence") or []}

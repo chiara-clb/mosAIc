@@ -47,3 +47,21 @@ def test_running_out_of_model_calls_ends_in_the_baseline():
 
 def test_engine_falls_back_to_the_built_in_runner():
     assert graph_engine()[3] in ("langgraph", "built-in runner")
+
+
+def test_a_research_memo_lets_later_runs_reuse_the_first_research():
+    memo = {}
+    first, run1 = forecast(research_memo=memo)
+    second, run2 = forecast(research_memo=memo)
+    research_calls = lambda run: [e for e in run.tools.trace.events if e["node"] == "research" and e["kind"] == "model_call"]
+    assert research_calls(run1) and not research_calls(run2)
+    assert any(e["kind"] == "reused" for e in run2.tools.trace.events)
+    ids = lambda s: sorted(e["id"] for e in s["evidence"])
+    assert ids(first) == ids(second)
+    assert run2.model.calls < run1.model.calls
+
+
+def test_without_a_memo_every_run_does_its_own_research():
+    _, run1 = forecast()
+    _, run2 = forecast()
+    assert all(any(e["node"] == "research" and e["kind"] == "model_call" for e in r.tools.trace.events) for r in (run1, run2))
