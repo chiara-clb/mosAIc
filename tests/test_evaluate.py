@@ -225,3 +225,23 @@ def test_baseline_with_the_averaged_variant_does_not_pay_for_tree_of_thought(mon
     E.evaluate_one("AAPL", DATES[0], chat(), "scripted", world_factory=fake_world, price_source=fake_prices,
                    variants=["baseline"])
     assert seen == ["tot"]                                       # nothing else runs, so ToT gives the baseline
+
+
+def test_the_tree_of_thought_readings_are_saved_for_rescoring(tmp_path):
+    run(tmp_path)
+    recs = [json.loads(line) for line in (tmp_path / "readings.jsonl").read_text().splitlines()]
+    assert len(recs) == 4 and {r["ticker"] for r in recs} == {"AAPL", "NKE"}
+    r = recs[0]
+    assert set(r) >= {"ticker", "as_of", "outcome", "implied", "baseline", "probabilities", "choice", "items"}
+    assert r["items"] and len(r["choice"]) == len(r["items"])
+    item = r["items"][0]
+    assert {"event", "lag_days", "novelty", "reaction_bucket"} <= set(item)
+    assert {x["effect"] for x in item["readings"]} >= {"none"}
+    assert all({"base_rate", "novelty", "score", "n", "ok"} <= set(x) for x in item["readings"])
+
+
+def test_resuming_adds_readings_only_for_new_dates(tmp_path):
+    run(tmp_path, limit=1)
+    run(tmp_path)
+    recs = [json.loads(line) for line in (tmp_path / "readings.jsonl").read_text().splitlines()]
+    assert len(recs) == 4 and len({(r["ticker"], r["as_of"]) for r in recs}) == 4

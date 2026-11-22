@@ -162,8 +162,9 @@ def default_world_factory(ticker: str, as_of: datetime):           # pragma: no 
 
 def evaluate_one(ticker: str, as_of: datetime, chat: Chat, model_name: str, *, world_factory: WorldFactory,
                  price_source: PriceSource, answer_key: AnswerKey | None = None, variants=None,
-                 memory: str = "flag", engine=None) -> list[dict]:
-    """All variant rows for one stock and date."""
+                 memory: str = "flag", engine=None, readings: list | None = None) -> list[dict]:
+    """All variant rows for one stock and date. With a `readings` list, the Tree of Thought run's readings
+    are appended to it (see readings_record), so other ways of scoring them can be tried later in code."""
     variants = variants or VARIANTS
     base_row = {"ticker": ticker, "as_of": f"{as_of:%Y-%m-%d}", "memory_answer": "", "memory_knows": "", "error": ""}
     try:
@@ -190,6 +191,8 @@ def evaluate_one(ticker: str, as_of: datetime, chat: Chat, model_name: str, *, w
             m = Model(chat, None, model_name)
             state, _ = run_forecast(world, m, options={"protocol": "two_way", "readings": "tot"}, engine=engine)
             base = state["final"]["baseline"]
+            if readings is not None:
+                readings.append(readings_record(state, ticker, as_of, outcome, implied))
             if "ToT" in variants:
                 add("ToT", state["final"]["probabilities"], state["final"]["status"], state["final"].get("review", ""), m.calls)
         if "single pass" in variants:
@@ -226,6 +229,27 @@ def evaluate_one(ticker: str, as_of: datetime, chat: Chat, model_name: str, *, w
         return [{**base_row, "variant": v, "status": "error", "error": f"{type(exc).__name__}: {exc}"} for v in variants]
 
 
+READING_KEYS = ("effect", "size", "ok", "base_rate", "novelty", "score", "n", "confidence", "quote", "reason")
+ITEM_KEYS = ("id", "event", "lag_days", "novelty", "reaction", "published")
+
+
+def readings_record(state: dict, ticker: str, as_of: datetime, outcome: str | None, implied: dict | None) -> dict:
+    """Everything the Tree of Thought chose from: each evidence item and its scored readings."""
+    tot = state.get("tot") or {}
+    items = {e["id"]: e for e in state.get("evidence") or []}
+    out_items = []
+    for p in tot.get("prepared") or []:
+        item = items.get(p["item"], {"id": p["item"]})
+        rx = item.get("reaction")
+        out_items.append({**{k: item.get(k) for k in ITEM_KEYS},
+                          "reaction_bucket": rx.get("bucket") if isinstance(rx, dict) else rx,
+                          "readings": [{k: r.get(k) for k in READING_KEYS} for r in p["readings"]]})
+    final = state.get("final") or {}
+    return {"ticker": ticker, "as_of": f"{as_of:%Y-%m-%d}", "outcome": outcome, "implied": implied,
+            "baseline": final.get("baseline"), "probabilities": final.get("probabilities"),
+            "status": final.get("status"), "choice": list(tot.get("choice") or []), "items": out_items}
+
+
 # --- writing and resuming -----------------------------------------------------------------------
 
 def done_keys(path: Path) -> set[tuple[str, str]]:
@@ -258,10 +282,18 @@ def run(tickers, dates, chat: Chat, model_name: str, out_dir: Path = OUT_DIR, *,
     if limit:
         todo = todo[:limit]
     log(f"{len(done)} stock-dates already done, {len(todo)} to run.")
+    readings_path = Path(out_dir) / "readings.jsonl"
+    if not resume and readings_path.exists():
+        readings_path.unlink()
     for i, (t, d) in enumerate(todo, 1):
+        saved: list = []
         rows = evaluate_one(t, d, chat, model_name, world_factory=world_factory, price_source=price_source,
-                            answer_key=answer_key, variants=variants, memory=memory, engine=engine)
+                            answer_key=answer_key, variants=variants, memory=memory, engine=engine, readings=saved)
         append_rows(path, rows)
+        if saved:
+            with readings_path.open("a", encoding="utf-8") as f:
+                for rec in saved:
+                    f.write(json.dumps(rec, default=str) + "\n")
         status = rows[0]["status"] if rows[0]["status"].startswith(("error", "dropped")) else "ok"
         log(f"[{i}/{len(todo)}] {t} {d:%Y-%m-%d}: {status}" + (f" ({rows[0]['error']})" if rows[0].get("error") else ""))
     table = pd.read_csv(path, dtype={"as_of": str}) if path.exists() else pd.DataFrame(columns=FIELDS)
