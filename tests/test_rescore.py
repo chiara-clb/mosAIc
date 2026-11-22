@@ -72,8 +72,9 @@ def test_the_summary_splits_july_from_august_and_lists_every_method():
     table = R.rescore(recs, R.scorers())
     s = R.summary(table)
     assert set(s["half"]) == {"all", "choose (July)", "check (August)"}
-    assert set(s["method"]) == {"baseline", "ToT as run", "ToT, current", "ToT, confidence", "ToT, reaction",
-                                "ToT, current + confidence", "ToT, current, no boilerplate"}
+    names = ["current", "confidence", "reaction", "current + confidence"]
+    assert set(s["method"]) == ({"baseline", "ToT as run"} | {f"ToT, {n}" for n in names}
+                                | {f"ToT, {n}, no boilerplate" for n in names})
     assert (s[s["method"] == "baseline"]["vs baseline"] == 0).all()
 
 
@@ -93,3 +94,11 @@ def test_real_news_is_kept_without_boilerplate():
 def test_the_summary_lists_the_no_boilerplate_replay():
     table = R.rescore([record([item("big rise", [reading("gain"), reading("none", size=None)])])], R.scorers())
     assert "ToT, current, no boilerplate" in set(table["method"])
+
+
+def test_every_scorer_is_replayed_without_boilerplate():
+    boiler = {**reading("fall", score=0.9, conf=0.9), "quote": "Number of shares Against 1,399,727,580"}
+    rec = record([item("big fall", [boiler, reading("none", size=None, score=0.2)])])
+    table = R.rescore([rec], R.scorers(pooled_base_rate=lambda r, it, x: 0.9))
+    clean = table[table["method"].str.endswith(", no boilerplate")]
+    assert len(clean) == 7 and (clean["moved"] == 0).all()           # every scorer falls back to the baseline

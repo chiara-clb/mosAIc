@@ -17,6 +17,9 @@ The scorers were fixed before any result was seen (22 Nov 2026):
                 stocks instead of this stock alone (A)
 - pooled + reaction, pooled + reaction + confidence, current + confidence: the plain averages
 
+Each scorer is also replayed with the boilerplate check that was added after the run, so a scorer is
+not judged on how it chose among quotes that say nothing.
+
 The weeks are split in two: the July forecasts are for choosing, the August ones for checking. A
 scorer counts as better only if it also wins in August, and every scorer tried is reported.
 """
@@ -138,7 +141,8 @@ def rescore(records: list[dict], scorer_set: dict[str, Scorer], split: str = SPL
         methods = {"baseline": dict(rec["baseline"]), "ToT as run": dict(rec["probabilities"])}
         for name, s in scorer_set.items():
             methods[f"ToT, {name}"] = rerun(rec, s)
-        methods["ToT, current, no boilerplate"] = rerun(rec, current, drop_boilerplate=True)
+        for name, s in scorer_set.items():                      # the same scorers, with the boilerplate check
+            methods[f"ToT, {name}, no boilerplate"] = rerun(rec, s, drop_boilerplate=True)
         for name, probs in methods.items():
             moved = max(abs(probs[k] - rec["baseline"][k]) for k in OUTCOMES)
             rows.append({**key, "method": name, **{k: round(probs[k], 2) for k in OUTCOMES},
