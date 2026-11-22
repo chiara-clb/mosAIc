@@ -67,6 +67,16 @@ What this shows:
 
 One data note: the pooled memory found only 8 filings for XOM, which looks like a lookup problem. It affects only the pooled scorers, and only slightly.
 
+**A check on the hard cases.** The paper tested Tree of Thought on deliberately hard puzzles, where a single chain fails. The closest thing here is the weeks before a results release, when there is more news and a big move is coming. The 47 forecasts were split into three groups (log loss against the options, compared with the baseline, so positive is worse):
+
+| Group | Forecasts | Tree moved | Tree vs baseline (95% interval) |
+| --- | --- | --- | --- |
+| Amazon, Alphabet and Nvidia before their results, with saved Wayback news | 13 | 9 | +0.0017 (+0.0002 to +0.0037) |
+| The same three stocks, other weeks, filings only | 11 | 4 | +0.0031 (+0.0008 to +0.0060) |
+| AAPL, MSFT and JPM, saved GDELT news | 23 | 16 | +0.0010 (−0.0015 to +0.0036) |
+
+No alternative scorer did better in any group. In the weeks before results, the tree leaned towards a fall 8 times out of 9, while the stocks mostly rose: Amazon was leaned down in all five July weeks and gained over the month in four of them. Only one lean (Alphabet, 1 July) matched what happened. The news before results seems to carry worries, such as AI spending, that the market had already priced. The tree turned them into bearish adjustments, as the results-day reader did with Amazon's free cash flow when thinking was off. So more news before results did not help: the agent moved more and was wrong more often.
+
 This changes the diagnosis in step 6. A better scorer is not enough for the monthly forecast. The evidence needs to be new, which is what results day is for.
 
 **8. Where it should fit.** The same fragility appears on results day. With thinking off, the reader leaned slightly towards a fall on Amazon's Q2 2026 release. With thinking on, the same release was read towards the gain that happened. Voting over several readings, or a tree with a good scorer, addresses exactly this. A natural home for Tree of Thought is tracing one company's results to its suppliers, customers and competitors. There each link is a branch that can point either way. Past releases give hundreds of cases (how company B moved after company A reported) to score each branch.
