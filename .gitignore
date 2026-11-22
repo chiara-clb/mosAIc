@@ -9,5 +9,7 @@ venv/
 # Local data and run outputs
 data/
 runs/
+# evaluation outputs hold probabilities worked out from licensed option data
+results/evaluation*/
 *.jsonl
 .streamlit/secrets.toml
