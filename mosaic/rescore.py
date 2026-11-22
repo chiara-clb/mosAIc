@@ -173,13 +173,12 @@ def pooled_memory(tickers, start: str, end: str, sec_get=None, price_fetch=None)
     """One case memory over all the stocks' filings and prices."""
     from mosaic.case_memory import CaseMemory
     from mosaic.config import SETTINGS
-    from mosaic.edgar import event_key, list_filings, parse_accepted, sec_getter, ticker_to_cik
+    from mosaic.edgar import company_filings, event_key, parse_accepted, sec_getter
     from mosaic.prices import load_closes
     get = sec_get or sec_getter()
-    ciks = ticker_to_cik(get)
     events, prices = {}, {}
     for t in tickers:
-        _, rows = list_filings(ciks[t], get)
+        _, rows = company_filings(t, get)
         events[t] = [(event_key(r["form"], r.get("items", "")), parse_accepted(r["acceptanceDateTime"])) for r in rows]
         prices[t] = load_closes(t, start, end, price_fetch)
         print(f"  {t}: {len(events[t])} filings, {len(prices[t])} prices")

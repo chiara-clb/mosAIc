@@ -135,3 +135,45 @@ def test_press_releases_are_found_by_type_when_the_file_name_does_not_say():
     }
     urls = edgar.exhibit_urls(1045810, "0001045810-26-000099", lambda u: Resp(pages[u]))
     assert urls == [base + "/q2fy27pr.htm", base + "/q2fy27cfocommentary.htm"]
+
+
+def predecessor_get(url):
+    """Two registrants for one ticker: the new holding company and the older company with the history."""
+    def sub(name, forms, dates, accessions, docs):
+        return json.dumps({"name": name, "filings": {"recent": {
+            "form": forms, "filingDate": [d[:10] for d in dates], "acceptanceDateTime": dates,
+            "accessionNumber": accessions, "primaryDocument": docs, "items": [""] * len(forms)}, "files": []}})
+    pages = {
+        "https://www.sec.gov/files/company_tickers.json": json.dumps({"0": {"cik_str": 2115436, "ticker": "XOM",
+                                                                            "title": "ExxonMobil Holdings Corp"}}),
+        "https://data.sec.gov/submissions/CIK0002115436.json": sub(
+            "ExxonMobil Holdings Corp", ["8-K", "10-Q"], ["2026-07-07T12:00:00.000Z", "2026-08-03T20:30:00.000Z"],
+            ["0002115436-26-000001", "0000034088-26-000099"], ["new-8k.htm", "q.htm"]),
+        "https://data.sec.gov/submissions/CIK0000034088.json": sub(
+            "EXXON MOBIL CORP", ["10-K", "10-Q"], ["2026-02-18T21:00:00.000Z", "2026-08-03T20:30:00.000Z"],
+            ["0000034088-26-000010", "0000034088-26-000099"], ["k.htm", "q.htm"]),
+    }
+    return Resp(pages[url])
+
+
+def test_a_ticker_that_moved_keeps_its_predecessors_history():
+    name, rows = edgar.company_filings("xom", predecessor_get)
+    assert name == "ExxonMobil Holdings Corp"
+    assert [r["accessionNumber"] for r in rows] == ["0000034088-26-000010", "0002115436-26-000001",
+                                                    "0000034088-26-000099"]          # oldest first, no duplicate
+    assert rows[0]["cik"] == 34088 and rows[1]["cik"] == 2115436
+
+
+def test_a_predecessors_documents_are_fetched_from_its_own_folder():
+    seen = []
+    row = {"form": "10-K", "acceptanceDateTime": "2026-02-18T21:00:00.000Z", "accessionNumber": "0000034088-26-000010",
+           "primaryDocument": "k.htm", "items": "", "cik": 34088}
+    edgar.filing_chunks("XOM", "ExxonMobil Holdings Corp", 2115436, row,
+                        lambda url: seen.append(url) or Resp("<html><body><p>Item 7. Results " + FILLER + "</p></body></html>"))
+    assert seen and all("/edgar/data/34088/" in u for u in seen)
+
+
+def test_other_tickers_are_unchanged():
+    name, rows = edgar.company_filings("ACME", lambda url: Resp(json.dumps({"0": {"cik_str": 42, "ticker": "ACME"}}))
+                                       if url.endswith("company_tickers.json") else get(url))
+    assert name == "Acme Robotics Inc." and [r["form"] for r in rows] == ["10-Q", "8-K"] and {r["cik"] for r in rows} == {42}

@@ -321,12 +321,12 @@ def live_results_case(ticker: str, release_day, options_dir: str | None = None, 
                       sec_get=None, price_fetch=None):                       # pragma: no cover - needs internet
     """(world for the agents, all closes for showing what happened afterwards)."""
     from mosaic.baseline import results_dates
-    from mosaic.edgar import list_filings, sec_getter, ticker_to_cik
+    from mosaic.edgar import company_filings, sec_getter
     from mosaic.prices import load_closes
     from mosaic.release_reader import fetch_release, load_consensus
     from mosaic.results_day import NEW_YORK
     get = sec_get or sec_getter()
-    company, filings = list_filings(ticker_to_cik(get)[ticker.upper()], get)
+    company, filings = company_filings(ticker, get)
     releases = results_dates(filings)
     match = [r for r in releases if r.astimezone(NEW_YORK).date() == release_day]
     if not match:

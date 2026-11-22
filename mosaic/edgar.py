@@ -92,12 +92,30 @@ def _rows(block: dict) -> list[dict]:
 
 
 def list_filings(cik: int, get) -> tuple[str, list[dict]]:
-    """(company name, every 10-Q, 10-K and 8-K), including the older pages EDGAR keeps in separate files."""
+    """(company name, every 10-Q, 10-K and 8-K), including the older pages EDGAR keeps in separate files.
+    Each row records the company number it was filed under, which its documents' addresses need."""
     sub = get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json").json()
     rows = _rows(sub["filings"]["recent"])
     for page in sub["filings"].get("files", []):
         rows += _rows(get(f"https://data.sec.gov/submissions/{page['name']}").json())
-    return sub.get("name", ""), [r for r in rows if r["form"] in FORMS]
+    return sub.get("name", ""), [{**r, "cik": cik} for r in rows if r["form"] in FORMS]
+
+
+# Companies whose ticker moved to a new SEC registrant, with the older registrants that hold their history.
+# XOM: ExxonMobil Holdings Corp (2115436) took over the ticker in July 2026; Exxon Mobil Corp (34088) has
+# the filings from 1994 to August 2026.
+PREDECESSORS: dict[str, tuple[int, ...]] = {"XOM": (34088,)}
+
+
+def company_filings(ticker: str, get) -> tuple[str, list[dict]]:
+    """A stock's filings across its current SEC registrant and any predecessor, without duplicates, oldest
+    first. The name is the current registrant's."""
+    ticker = ticker.upper()
+    name, rows = list_filings(ticker_to_cik(get)[ticker], get)
+    for old in PREDECESSORS.get(ticker, ()):
+        rows += list_filings(old, get)[1]
+    unique = {r["accessionNumber"]: r for r in rows}
+    return name, sorted(unique.values(), key=lambda r: r["acceptanceDateTime"])
 
 
 def filing_base(cik: int, accession: str) -> str:
@@ -216,6 +234,7 @@ def event_key(form: str, items) -> str:
 def filing_chunks(ticker: str, company: str, cik: int, row: dict, get) -> list[dict]:
     """All chunks of one filing (main document, plus press releases for an 8-K)."""
     accepted = parse_accepted(row["acceptanceDateTime"])
+    cik = row.get("cik", cik)                  # a predecessor's filing lives under its own number
     docs = [(filing_base(cik, row["accessionNumber"]) + "/" + row["primaryDocument"], "Main document")]
     if row["form"] == "8-K":
         docs += [(u, "Press release") for u in exhibit_urls(cik, row["accessionNumber"], get)]

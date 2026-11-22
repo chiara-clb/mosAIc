@@ -249,14 +249,13 @@ def read_release(release_text: str, baselines: dict, tau: float, consensus: list
 
 def fetch_release(ticker: str, release, get=None) -> str:                   # pragma: no cover - needs internet
     """The press release text (Exhibit 99.1) of the results 8-K accepted at `release`."""
-    from mosaic.edgar import exhibit_urls, html_to_text, list_filings, parse_accepted, sec_getter, ticker_to_cik
+    from mosaic.edgar import company_filings, exhibit_urls, html_to_text, parse_accepted, sec_getter
     get = get or sec_getter()
-    cik = ticker_to_cik(get)[ticker.upper()]
-    _, rows = list_filings(cik, get)
+    _, rows = company_filings(ticker, get)
     row = next((r for r in rows if r["form"] == "8-K" and parse_accepted(r["acceptanceDateTime"]) == release), None)
     if row is None:
         raise ValueError(f"no 8-K from {ticker} accepted at {release}")
-    urls = exhibit_urls(cik, row["accessionNumber"], get)
+    urls = exhibit_urls(row["cik"], row["accessionNumber"], get)
     if not urls:
         raise ValueError(f"the results 8-K of {ticker} has no press release exhibit")
     return html_to_text(get(urls[0]).text)

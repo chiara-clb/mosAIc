@@ -14,7 +14,7 @@ from typing import Callable
 from mosaic.baseline import results_dates
 from mosaic.case_memory import CaseMemory
 from mosaic.config import SETTINGS
-from mosaic.edgar import build_corpus, event_key, list_filings, parse_accepted, sec_getter, ticker_to_cik
+from mosaic.edgar import build_corpus, company_filings, event_key, parse_accepted, sec_getter, ticker_to_cik
 from mosaic.index import Index, sentence_transformer_embed
 from mosaic.news import Gdelt, news_items
 from mosaic.novelty import novelty
@@ -62,7 +62,7 @@ def live_world(ticker: str, as_of: datetime, *, sec_get=None, gdelt: Gdelt | Non
         gdelt = archive if archive.covers(ticker, as_of) else Gdelt()
     say("Listing SEC filings")
     cik = ticker_to_cik(get)[ticker]
-    company, rows = list_filings(cik, get)
+    company, rows = company_filings(ticker, get)
     say(f"Reading {company}'s filings from the last {history_days} days")
 
     # Documents from the last 200 days (enough for the previous 10-Q or 10-K, for novelty)

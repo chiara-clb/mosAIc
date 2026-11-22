@@ -189,9 +189,9 @@ def release_choices(releases: list[datetime], option_quarters: set[tuple[int, in
 def live_release_choices(ticker: str, options_dir: str | None = None, get=None) -> list[dict]:   # pragma: no cover
     """The after-close results releases of a stock since 2023, from its SEC filings."""
     from mosaic.baseline import results_dates
-    from mosaic.edgar import list_filings, sec_getter, ticker_to_cik
+    from mosaic.edgar import company_filings, sec_getter
     get = get or sec_getter()
-    _, filings = list_filings(ticker_to_cik(get)[ticker.upper()], get)
+    _, filings = company_filings(ticker, get)
     quarters = None
     if options_dir:
         from mosaic.firstrate import find_files
@@ -205,11 +205,11 @@ def load_live(ticker: str, release_day: date, options_dir: str | None = None, se
               price_fetch=None) -> ResultsDay:                      # pragma: no cover - needs internet
     """Fetch SEC results dates, prices and (if given) the FirstRate chain, then compute the baselines."""
     from mosaic.baseline import results_dates
-    from mosaic.edgar import list_filings, sec_getter, ticker_to_cik
+    from mosaic.edgar import company_filings, sec_getter
     from mosaic.prices import load_closes
 
     get = sec_get or sec_getter()
-    _, filings = list_filings(ticker_to_cik(get)[ticker.upper()], get)
+    _, filings = company_filings(ticker, get)
     releases = results_dates(filings)
     match = [r for r in releases if r.astimezone(NEW_YORK).date() == release_day]
     if not match:
