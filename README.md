@@ -66,7 +66,7 @@ The results are in [docs/results.md](docs/results.md). In short, no variant got 
 | `docs/tree_of_thought.md` | How Tree of Thought was built and tested, step by step, and what it really adds |
 | `docs/results.md` | All results: the notebooks, the guardrail ablation, the evaluation on real stocks and the results-day demonstration |
 | `docs/figures/` | Architecture diagrams. `figure1_final.png` is the final system, and the other files are earlier checkpoints |
-| `results/` | The guardrail ablation and design comparison on the demo scenarios. The evaluation on real stocks writes here too, but its files use licensed option data and stay out of the repository |
+| `results/` | The guardrail ablation and design comparison on the demo scenarios, and `evaluation_summary.md` with the averaged scores of every evaluation run. The per-forecast files use licensed option data and stay out of the repository |
 
 The notebooks are where each part was first tested. The package holds the final version of the same code.
 
