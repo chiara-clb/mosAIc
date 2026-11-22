@@ -46,10 +46,25 @@ The current scorer reproduced all 47 forecasts. July forecasts were for choosing
 | Current + confidence | 13 | +0.0006 | +0.0008 | +0.0001 | 0.6607 |
 | Pooled base rates | 29 | +0.0027 | +0.0022 | +0.0037 | 0.6726 |
 | Pooled + reaction | 32 | +0.0033 | +0.0028 | +0.0040 | 0.6803 |
-| Pooled + reaction + confidence | 11 | +0.0013 | +0.0004 | +0.0030 | 0.6637 |
+| Pooled + reaction + confidence | 12 | +0.0015 | +0.0007 | +0.0030 | 0.6642 |
 | Current, boilerplate pruned (check added after the run) | 18 | −0.0000 | −0.0001 | +0.0001 | 0.6571 |
 
-19 of the 42 lines the tree chose quoted boilerplate. The boilerplate patterns were written from these lines, so this row is in-sample.
+19 of the 42 lines the tree chose quoted boilerplate. The boilerplate patterns were written from these lines, so this row is in-sample. The pooled rows use the XOM filings after the lookup fix.
+
+Every scorer replayed with the boilerplate check (log loss against the options, compared with the baseline):
+
+| Scorer | With boilerplate | Without: moved | Without: all 47 | Without: July | Without: August | Brier, outcome |
+| --- | --- | --- | --- | --- | --- | --- |
+| Current (the design) | +0.0017 | 18 | −0.0000 | −0.0001 | +0.0001 | 0.657 |
+| Model confidence | −0.0006 | 1 | −0.0001 | −0.0001 | 0.0000 | 0.648 |
+| Current + confidence | +0.0006 | 8 | +0.0001 | +0.0001 | +0.0001 | 0.657 |
+| Pooled + reaction + confidence | +0.0015 | 8 | +0.0005 | +0.0001 | +0.0013 | 0.658 |
+| Pooled base rates | +0.0027 | 19 | +0.0008 | +0.0001 | +0.0019 | 0.660 |
+| Price reaction | +0.0014 | 13 | +0.0009 | +0.0001 | +0.0024 | 0.662 |
+| Pooled + reaction | +0.0033 | 22 | +0.0014 | +0.0009 | +0.0023 | 0.667 |
+| Baseline | 0 | 0 | 0 | 0 | 0 | 0.650 |
+
+Removing boilerplate cuts the harm for every scorer, but no scorer beats the baseline in the August check, and the order holds: the more a scorer moves the forecast, the worse it scores. So boilerplate explains why the tree was worse than the baseline, not why it was not better. The real news lines that remain carry nothing the option market had not already priced.
 
 ## 5. Results day, three releases (thinking on)
 

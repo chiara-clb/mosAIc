@@ -53,7 +53,7 @@ On this larger sample the tree as run is slightly but clearly further from the o
 | --- | --- | --- | --- | --- |
 | Model confidence | 2 | −0.0006 | −0.0010 | 0.0000 |
 | Current + confidence | 13 | +0.0006 | +0.0008 | +0.0001 |
-| Pooled + reaction + confidence | 11 | +0.0013 | +0.0004 | +0.0030 |
+| Pooled + reaction + confidence | 12 | +0.0015 | +0.0007 | +0.0030 |
 | Reaction | 18 | +0.0014 | −0.0003 | +0.0044 |
 | Current (the run) | 29 | +0.0017 | +0.0016 | +0.0018 |
 | Pooled base rates | 29 | +0.0027 | +0.0022 | +0.0037 |
@@ -98,5 +98,20 @@ The fix (`mosaic/boilerplate.py`) prunes any reading whose quote is boilerplate,
 | Baseline | 0 | 0 | 0 | 0 | 0.650 |
 
 Pruning boilerplate removes the whole gap with the option market: the tree's measured disadvantage came from boilerplate, not from the real news it read. It does not make the tree better than the baseline, which fits the main finding that the monthly news is already priced. The patterns were written from these same 42 lines, so this replay is in-sample, and a fresh run on new dates is needed to confirm it. The lesson for the evaluation is to read a sample of the actual outputs, not only the scores.
+
+**Were the other scorers judged unfairly?** The six alternative scorers in step 7 were tested with the boilerplate still in, so a scorer could have looked bad only because it was choosing among empty lines. `python -m mosaic.rescore` now replays every scorer with the boilerplate check too (log loss against the options, compared with the baseline):
+
+| Scorer | With boilerplate | Without: moved | Without: all 47 | Without: July | Without: August | Brier, outcome |
+| --- | --- | --- | --- | --- | --- | --- |
+| Current (the design) | +0.0017 | 18 | −0.0000 | −0.0001 | +0.0001 | 0.657 |
+| Model confidence | −0.0006 | 1 | −0.0001 | −0.0001 | 0.0000 | 0.648 |
+| Current + confidence | +0.0006 | 8 | +0.0001 | +0.0001 | +0.0001 | 0.657 |
+| Pooled + reaction + confidence | +0.0015 | 8 | +0.0005 | +0.0001 | +0.0013 | 0.658 |
+| Pooled base rates | +0.0027 | 19 | +0.0008 | +0.0001 | +0.0019 | 0.660 |
+| Price reaction | +0.0014 | 13 | +0.0009 | +0.0001 | +0.0024 | 0.662 |
+| Pooled + reaction | +0.0033 | 22 | +0.0014 | +0.0009 | +0.0023 | 0.667 |
+| Baseline | 0 | 0 | 0 | 0 | 0 | 0.650 |
+
+Removing boilerplate cuts the harm for every scorer, but no scorer beats the baseline in the August check, and the order holds: the more a scorer moves the forecast, the worse it scores. So boilerplate explains why the tree was worse than the baseline, not why it was not better. The real news lines that remain carry nothing the option market had not already priced.
 
 **8. Where it should fit.** The same fragility appears on results day. With thinking off, the reader leaned slightly towards a fall on Amazon's Q2 2026 release. With thinking on, the same release was read towards the gain that happened. Voting over several readings, or a tree with a good scorer, addresses exactly this. A natural home for Tree of Thought is tracing one company's results to its suppliers, customers and competitors. There each link is a branch that can point either way. Past releases give hundreds of cases (how company B moved after company A reported) to score each branch.
