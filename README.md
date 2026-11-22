@@ -25,6 +25,30 @@ An equity analyst who wants a quick, checkable view of a stock before results or
 
 Every tool returns only data published before the forecast date, and every step is logged.
 
+## What it looks like
+
+The screenshots below come from the Streamlit app (`streamlit run app.py`). The first four show one forecast on the synthetic demo company, scenario 9 ("rare event, big move"), where the guardrails are meant to hold the forecast for the analyst. The last shows results day on a real release.
+
+**1. Forecast and ledger.** The *quant agent*'s baseline (dark bars) and the forecast after the ledger (light bars). Each ledger line was written by the *synthesis agent*, quotes its source and passed the *critic*'s checks. The *risk gate* found two warning signs, a 13.5-point move and a line resting on only 8 past cases, so it held the forecast. The analyst can now keep, resize or strike each line in the **Analyst review** tab.
+
+![Forecast and ledger](docs/figures/app_1_forecast_and_ledger.png)
+
+**2. Tree of Thought.** Every reading the *synthesis agent* considered for each evidence item. Each reading has its quote check, its base rate from past events, its novelty and its score, and the beam search marks the combination it chose. This is the step evaluated in `docs/results.md`.
+
+![Tree of Thought readings](docs/figures/app_2_tree_of_thought.png)
+
+**3. Steps.** The flow in Figure 1, one row per step: what each agent did, how many model and tool calls it made, and its note. Here the *research agent* ran four searches, the *synthesis agent* chose the readings, the *critic* accepted them and the *risk gate* held the forecast.
+
+![Steps](docs/figures/app_3_steps.png)
+
+**4. Tool calls.** Every call through the tool door, with the agent that made it and the result. Each agent only reaches the tools its role allows, and a refused call would show here and count as a warning sign.
+
+![Tool calls](docs/figures/app_4_tool_calls.png)
+
+**5. Results day.** Amazon's Q2 2026 release. The three baselines are computed in code: B1 from daily moves, B2 from past results-day moves and B3 from the option prices at the close. The *release reader* compares the release with the analysts' consensus and writes a quoted ledger, which shifts B3 into MosAIc's forecast. What happened the next day is shown only after the run and is never given to the agents.
+
+![Results day](docs/figures/app_5_results_day.png)
+
 ## How it is evaluated
 
 The main test is how close the forecast gets to the probabilities implied by option prices on the forecast date. Option prices are used only for scoring and are never shown to the agent. Forecasts are also compared with what actually happened, and with simpler variants: price history only, a prompt-only model, the baseline adjusted from the model's memory, and the agent without Tree of Thought.
