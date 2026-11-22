@@ -229,3 +229,24 @@ def test_offline_news_can_be_set_from_the_environment(monkeypatch, tmp_path):
     assert Gdelt(cache_file=tmp_path / "c.json").offline is True
     monkeypatch.delenv("MOSAIC_NEWS_OFFLINE")
     assert Gdelt(cache_file=tmp_path / "c.json").offline is False
+
+
+def test_short_names_are_left_out_of_the_search_but_kept_in_the_filter():
+    from mosaic.news import names_company, news_query
+    assert news_query("Amazon.com, Inc.", "AMZN") == '"Amazon" (shares OR stock OR earnings OR analyst) sourcelang:english'
+    assert '"AWS"' not in news_query("Amazon.com, Inc.", "AMZN")
+    assert '"Johnson & Johnson"' in news_query("Johnson & Johnson", "JNJ") and "J&J" not in news_query("Johnson & Johnson", "JNJ")
+    assert names_company("AWS outage hits retailers", "Amazon.com, Inc.", "AMZN")
+    assert news_query("Apple Inc.", "AAPL") == '"Apple" (shares OR stock OR earnings OR analyst) sourcelang:english'
+
+
+def test_an_invalid_search_is_not_retried(tmp_path, capsys):
+    calls = []
+
+    def bad(params):
+        calls.append(1)
+        raise RuntimeError("GDELT did not return data: The specified phrase is too short.")
+
+    g = Gdelt(tmp_path / "c.json", http_get=bad, spacing=0, retries=3)
+    assert g({"mode": "artlist", "query": "x"}) == {}
+    assert len(calls) == 1 and g.errors[0].startswith("artlist: invalid search")

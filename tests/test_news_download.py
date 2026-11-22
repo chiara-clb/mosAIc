@@ -67,3 +67,16 @@ def test_calls_wait_the_spacing_asked_for(tmp_path, monkeypatch):
     g = Gdelt(tmp_path / "c.json", http_get=fake([]), spacing=15, offline=False)
     download(["NVDA"], date(2026, 7, 1), date(2026, 7, 1), g, log=lambda m: None)
     assert len(waits) >= 7 and all(w >= 14 for w in waits)
+
+
+def test_an_invalid_search_stops_the_download_at_once(tmp_path):
+    calls = []
+
+    def bad(params):
+        calls.append(params)
+        raise RuntimeError("GDELT did not return data: The specified phrase is too short.")
+
+    g = Gdelt(tmp_path / "c.json", http_get=bad, spacing=0, retries=3, offline=False)
+    lines = []
+    rows = download(["AMZN", "NVDA"], date(2026, 7, 1), date(2026, 7, 15), g, log=lines.append)
+    assert len(calls) == 1 and rows[-1]["stopped"] == "invalid search" and "Stopping" in lines[-1]

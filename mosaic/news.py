@@ -55,8 +55,13 @@ def news_terms(company: str, ticker: str) -> list[str]:
     return NEWS_NAMES.get(ticker.upper()) or [news_name(company, ticker)]
 
 
+GDELT_MIN_TERM = 4                    # GDELT rejects a search with a shorter phrase ("AWS", "J&J", "P&G")
+
+
 def news_query(company: str, ticker: str) -> str:
-    terms = news_terms(company, ticker)
+    """The GDELT search. Names shorter than GDELT allows are left out of the search, but headlines that
+    use them still pass the filter (names_company) once found."""
+    terms = [t for t in news_terms(company, ticker) if len(t) >= GDELT_MIN_TERM] or [news_name(company, ticker)]
     names = f'"{terms[0]}"' if len(terms) == 1 else "(" + " OR ".join(f'"{t}"' for t in terms) + ")"
     return f"{names} (shares OR stock OR earnings OR analyst) sourcelang:english"
 
@@ -205,6 +210,9 @@ class Gdelt:
                 payload = self.http_get(params)
             except Exception as e:                           # network error or a refusal
                 error = f"{type(e).__name__}: {e}"
+                if invalid_search(error):                    # retrying cannot help: the search itself is wrong
+                    error = f"invalid search: {error}"
+                    break
                 self._pace = min(self._pace * 2, 40.0)
                 continue
             self._pace = max(self._pace * 0.8, self.spacing)
@@ -244,6 +252,12 @@ class Gdelt:
 
 
 GDELT_TIME = "%Y%m%d%H%M%S"
+INVALID_SEARCH = ("too short", "too common", "must be surrounded", "invalid query")
+
+
+def invalid_search(error: str) -> bool:
+    """True for GDELT's answers about a malformed search, as opposed to a refusal or a network error."""
+    return any(m in error.lower() for m in INVALID_SEARCH)
 
 
 def day_params(query: str, start: datetime, end: datetime) -> dict:

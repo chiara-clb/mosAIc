@@ -56,6 +56,11 @@ def download(tickers: list[str], start: date, end: date, gdelt: Gdelt, also: lis
             saved = json.dumps(params, sort_keys=True) in gdelt.cache
             before = len(gdelt.errors)
             got = len((gdelt(params) or {}).get("articles", []))
+            if len(gdelt.errors) > before and "invalid search" in gdelt.errors[-1]:
+                log(f"{ticker}: GDELT rejected the search itself ({gdelt.errors[-1]}). Stopping: fix the search first.")
+                rows.append({"ticker": ticker, "days": n - 1, "headlines": articles, "failed calls": failed + 1,
+                             "stopped": "invalid search"})
+                return rows
             failed += len(gdelt.errors) > before
             articles += got
             status = "saved" if saved else ("failed, run again later" if len(gdelt.errors) > before else "downloaded")
