@@ -114,6 +114,10 @@ The same 23 forecasts, rerun with Claude Haiku 5.5 thinking before each answer (
 
 The picture against the option market is the same: no variant beats the baseline, and only the prompt-only model is clearly worse. Thinking helped the single pass most (1.097 to 1.090, Brier 0.680 to 0.653), and it now does slightly better than Tree of Thought. Comparing four readings helped when the model answered at once. Once it reasons before answering, the tree adds little with the current scorer, which uses thin per-stock base rates.
 
+### More forecasts, and other ways to score the readings
+
+A later Tree of Thought run on 47 forecasts (AAPL, MSFT, JPM, AMZN, GOOGL and NVDA, 1 July to 19 August 2026, thinking on) found the tree slightly but clearly further from the option market than the baseline: +0.0017, 95% interval +0.0006 to +0.0029. Replaying its saved readings with six other scorers (`python -m mosaic.rescore`) found none that beat leaving the baseline alone. Details, with the July and August split and a check on the weeks before results, are in [tree_of_thought.md](tree_of_thought.md), step 7.
+
 ### Five single passes, averaged
 
 The full story of these Tree of Thought tests, with the comparison to the course lab, is in [tree_of_thought.md](tree_of_thought.md).
