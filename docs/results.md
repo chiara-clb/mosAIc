@@ -114,6 +114,19 @@ The same 23 forecasts, rerun with Claude Haiku 5.5 thinking before each answer (
 
 The picture against the option market is the same: no variant beats the baseline, and only the prompt-only model is clearly worse. Thinking helped the single pass most (1.097 to 1.090, Brier 0.680 to 0.653), and it now does slightly better than Tree of Thought. Comparing four readings helped when the model answered at once. Once it reasons before answering, the tree adds little with the current scorer, which uses thin per-stock base rates. The results-day demonstration below was run with thinking off.
 
+### Five single passes, averaged
+
+To check whether Tree of Thought adds more than repeating and averaging, the single pass was run five times on one shared research step and the five forecasts were averaged (`--variants "baseline,5 single passes"`, thinking on, same saved news). Each run did its own research, so a small part of the differences between runs comes from different searches.
+
+| Variant (thinking on) | Log loss vs options | vs baseline (95% interval) | Log loss vs outcome | Brier vs outcome | Model calls per forecast |
+| --- | --- | --- | --- | --- | --- |
+| Baseline | 1.090 | | 1.071 | 0.647 | 0 |
+| Single pass | 1.090 | +0.001 (−0.003 to +0.004) | 1.078 | 0.653 | 10.5 |
+| 5 single passes, averaged | 1.091 | +0.001 (−0.001 to +0.006) | 1.096 | 0.665 | 37 |
+| Tree of Thought | 1.092 | +0.002 (−0.000 to +0.005) | 1.099 | 0.666 | 10.1 |
+
+Averaging five single passes scored almost exactly like Tree of Thought on every measure. So the tree's effect so far is what smoothing over several readings gives, not better reasoning, which fits a scorer built on few past events per stock. Neither beats one single pass or the baseline, and all differences are within the margin of error.
+
 ## 6. Results day: a demonstration on three releases
 
 `python -m mosaic.results_day --read`, Claude Haiku 5.5, Q2 2026 releases after the close. It was added late, so this is only a demonstration of the flow and its guardrails. Three events cannot tell whether the reader helps.
