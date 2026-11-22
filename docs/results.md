@@ -112,7 +112,7 @@ The same 23 forecasts, rerun with Claude Haiku 5.5 thinking before each answer (
 | Single pass | 1.090 | +0.001 (−0.003 to +0.004) | 1.078 | 0.653 |
 | Tree of Thought | 1.092 | +0.002 (−0.000 to +0.005) | 1.099 | 0.666 |
 
-The picture against the option market is the same: no variant beats the baseline, and only the prompt-only model is clearly worse. Thinking helped the single pass most (1.097 to 1.090, Brier 0.680 to 0.653), and it now does slightly better than Tree of Thought. Comparing four readings helped when the model answered at once. Once it reasons before answering, the tree adds little with the current scorer, which uses thin per-stock base rates. The results-day demonstration below was run with thinking off.
+The picture against the option market is the same: no variant beats the baseline, and only the prompt-only model is clearly worse. Thinking helped the single pass most (1.097 to 1.090, Brier 0.680 to 0.653), and it now does slightly better than Tree of Thought. Comparing four readings helped when the model answered at once. Once it reasons before answering, the tree adds little with the current scorer, which uses thin per-stock base rates.
 
 ### Five single passes, averaged
 
@@ -129,21 +129,24 @@ Averaging five single passes scored almost exactly like Tree of Thought on every
 
 ## 6. Results day: a demonstration on three releases
 
-`python -m mosaic.results_day --read`, Claude Haiku 5.5, Q2 2026 releases after the close. It was added late, so this is only a demonstration of the flow and its guardrails. Three events cannot tell whether the reader helps.
+`python -m mosaic.results_day --read` (or the app's Results day mode), Claude Haiku 5.5 with thinking on, Q2 2026 releases after the close. It was added late, so this is only a demonstration of the flow and its guardrails. Three events cannot tell whether the reader helps.
 
 | | Alphabet (GOOGL) | Nvidia (NVDA) | Amazon (AMZN) |
 | --- | --- | --- | --- |
 | Options at the close (B3): fall / flat / gain | 38 / 27 / 36 | 40 / 26 / 34 | 40 / 23 / 37 |
-| MosAIc after the reader | 36 / 21 / 44 | 30 / 21 / 49 | 42 / 23 / 35 |
-| Risk gate | publish | hold (a 15-point shift, and the critic sent a line back) | flag (the critic sent a line back) |
+| MosAIc after the reader | 35 / 25 / 40 | 30 / 21 / 50 | 37 / 21 / 43 |
+| Risk gate | hold (the model doubted its reading, and the critic sent a line back) | flag (a 15-point shift) | publish |
 | What happened next day | fall (−7.4%) | gain (+8.4%) | gain (+14.3%) |
-| Chance B3 gave it | 37.5% | 34.5% | 37% |
-| Chance MosAIc gave it | 35.9% | 49.1% | 35% |
+| Chance B3 gave it | 37.5% | 34.5% | 37.0% |
+| Chance MosAIc gave it | 35.0% | 49.5% | 42.8% |
+| Same, with thinking off (earlier run) | 35.9% | 49.1% | 35% |
+
+Average log loss over the three: options 1.013, MosAIc 0.867 with thinking on (0.928 with thinking off).
 
 What this shows:
 
-- **The reader separated operating results from one-off items,** such as investment gains, and quoted the release for every line.
-- **The guardrails caught problems.** On Nvidia and Amazon the critic found a quote that was not in the release and sent it back with the reason, and the corrected line passed. On Nvidia the risk gate also held the forecast for the analyst.
-- **One clear hit and two small misses.** On Nvidia MosAIc gave the gain a 49% chance against 35% from the options. On Alphabet and Amazon it gave what happened a slightly lower chance than the options.
-- **Correct quotes did not make a correct reading.** Amazon rose 14.3%, but the reader gave more weight to negative free cash flow than to the AWS beat and leaned slightly towards a fall. The critic checks quotes. It cannot check judgement.
-- **No data leaked.** The leakage audit was clean on all three runs, and the next-day move appears only in the log section marked as after the run.
+- **The reader separated operating results from one-off items,** such as gains on investments, and quoted the release for every line.
+- **The guardrails caught problems.** On Alphabet the critic found a quote with words left out ("...") and sent it back with the reason, and the corrected line passed. The risk gate then held the forecast because the model gave its own reading low confidence. On Nvidia it flagged a 15-point shift for the analyst.
+- **Two gains called, one small miss.** MosAIc gave Nvidia's and Amazon's gains more chance than the options did (50% against 35%, 43% against 37%), and Alphabet's fall slightly less (35% against 38%).
+- **One reading can flip.** With thinking off, the reader weighed Amazon's negative free cash flow above the AWS beat and leaned slightly towards a fall. With thinking on, it read the same release towards a gain. The critic checks quotes. It cannot check judgement, so a single reading per release is fragile.
+- **No data leaked.** The leakage audit was clean on every run, and the next-day move appears only in the log section marked as after the run.
