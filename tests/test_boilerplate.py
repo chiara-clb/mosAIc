@@ -15,6 +15,11 @@ BOILERPLATE = [
     "Number of shares Against 1,399,727,580",
     "Legal risk is the risk of loss primarily caused by the actual or alleged failure to meet legal obligations",
     "Free cash flow $ 24,461 $ 24,551 $ 10,116 $ (5,855) $ 53,273",
+    # found on Amazon, 1 July 2026, after the check was added
+    "Term Loan Agreement, dated as of June 8 2026, among",
+    "Credit Agreement, dated June 8, 2026, by and between",
+    "pursuant to an Underwriting Agreement dated June 8, 2026 (the “Underwriting Agreement”) among the Company and the several underwriters named therein",
+    "The information set forth in Item 1.01 of this Current Report on Form 8-K is hereby incorporated by reference into this Item 2.03.",
 ]
 
 NEWS = [
@@ -26,6 +31,10 @@ NEWS = [
     "Revenue is expected to be $108.0 billion, plus or minus 2%.",
     "C$4,750,000,000 aggregate principal amount of its 5.000% notes due 2056",
     "Apple iPhone Ultra Release : Folding iPhone Tipped For Delays And Supply Issues",
+    "closed the sale of C$1,250,000,000 aggregate principal amount of its 3.400% notes due 2029",
+    "Amazon signs agreement to buy a stake in a chip designer",
+    "Microsoft to cut 4 , 800 jobs , latest AI - driven tech layoffs",
+    "Emerges As A Top - Three Global Chip Business Hidden Inside Its AI Buildout",
 ]
 
 

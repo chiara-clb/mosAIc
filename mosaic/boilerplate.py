@@ -31,8 +31,15 @@ PHRASES = (
     "votes cast",
     "is the risk of loss",
     "is the risk that",
+    "dated as of",
+    "named therein",
+    "the information set forth in",
+    "hereby",
 )
 
+DEFINED_TERM = re.compile(r"\(the [“\"][^”\"]{1,60}[”\"]\)", re.IGNORECASE)   # (the “Underwriting Agreement”)
+CUT_OFF = re.compile(r"\b(among|between|by and between|of|to|and|the)\s*[,.;:]?\s*$", re.IGNORECASE)  # a cut title
+AGREEMENT_TITLE = re.compile(r"\bagreement\b", re.IGNORECASE)
 ITEM_HEADING = re.compile(r"^\s*item\s+\d+(\.\d+)?\b", re.IGNORECASE)        # "ITEM 2.03 CREATION OF ..."
 NUMBER = re.compile(r"^[A-Z]{0,2}[$€£]?\(?\d[\d,.]*\)?%?$")                  # 1,399,727,580  C$4,750  (5,855)  26%
 
@@ -50,7 +57,9 @@ def is_boilerplate(quote: str | None) -> bool:
     if not q:
         return False
     low = q.lower()
-    if any(p in low for p in PHRASES) or ITEM_HEADING.match(q):
+    if any(p in low for p in PHRASES) or ITEM_HEADING.match(q) or DEFINED_TERM.search(q):
+        return True
+    if AGREEMENT_TITLE.search(q) and CUT_OFF.search(q):           # "Term Loan Agreement, dated June 8 2026, among"
         return True
     words = [w for w in q.split() if re.search(r"\w", w)]
     return len(words) >= 3 and numeric_share(q) >= 0.4                       # a row of numbers with a label
