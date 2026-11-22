@@ -49,3 +49,42 @@ def test_archive_articles_go_through_the_same_filters_and_stories(tmp_path):
         import numpy as np
         return np.array([[1.0, 0.0] if "Q2" in t else [0.0, 1.0] for t in texts])
     assert len(build_stories(kept, embed)) == 1                           # the two "Q2 results" headlines
+
+
+# --- GDELT and the archive together ---------------------------------------------------------------
+
+from mosaic.news import Gdelt  # noqa: E402
+from mosaic.news_archive import CombinedNews, news_source  # noqa: E402
+
+
+def gdelt_with(tmp_path, titles):
+    def http(params):
+        if params["mode"] != "artlist":
+            return {"timeline": [{"data": []}]}
+        return {"articles": [{"title": t, "seendate": params["startdatetime"][:8] + "T120000Z", "url": u,
+                              "domain": "gdelt.example"} for u, t in titles]}
+    return Gdelt(tmp_path / "g.json", http_get=http, spacing=0, offline=False)
+
+
+def test_combined_keeps_both_sources_each_link_once_and_gdelt_tone(tmp_path):
+    write_event(tmp_path)
+    g = gdelt_with(tmp_path, [("u1", "Alphabet shares rise ahead of Q2 results"), ("g9", "Google cloud deal")])
+    arts, tone = CombinedNews(g, ArchiveNews(tmp_path)).fetch("Alphabet Inc.", "GOOGL", datetime(2026, 7, 22, tzinfo=UTC))
+    urls = [a["url"] for a in arts["articles"]]
+    assert sorted(set(urls)) == ["g9", "u1", "u2"] and len(urls) == len(set(urls))
+    assert tone == {"timeline": [{"data": []}]}
+
+
+def test_combined_keeps_the_date_rule(tmp_path):
+    write_event(tmp_path)
+    g = gdelt_with(tmp_path, [])
+    arts, _ = CombinedNews(g, ArchiveNews(tmp_path)).fetch("Alphabet Inc.", "GOOGL", datetime(2026, 7, 21, tzinfo=UTC))
+    assert [a["url"] for a in arts["articles"]] == ["u1"]          # u2 and u3 were captured after the date
+
+
+def test_source_is_combined_only_where_the_archive_covers(tmp_path):
+    write_event(tmp_path)
+    g, a = gdelt_with(tmp_path, []), ArchiveNews(tmp_path)
+    assert isinstance(news_source("GOOGL", datetime(2026, 7, 22, tzinfo=UTC), g, a), CombinedNews)
+    assert news_source("GOOGL", datetime(2026, 8, 19, tzinfo=UTC), g, a) is g
+    assert news_source("AAPL", datetime(2026, 7, 22, tzinfo=UTC), g, a) is g

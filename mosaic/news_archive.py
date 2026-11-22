@@ -60,3 +60,39 @@ class ArchiveNews:
         if progress:
             progress(f"News: {len(articles)} saved articles from the archive")
         return {"articles": articles}, {}
+
+
+class CombinedNews:
+    """GDELT and the saved archive together: the articles of both, each link once, and GDELT's tone.
+
+    The archive alone has about a dozen articles per stock, from the week before results. GDELT has far
+    more, once it has been downloaded (python -m mosaic.news_download). Both go through the same filters.
+    """
+
+    def __init__(self, gdelt, archive: ArchiveNews):
+        self.gdelt, self.archive = gdelt, archive
+
+    @property
+    def errors(self) -> list[str]:
+        return self.gdelt.errors
+
+    def fetch(self, company: str, ticker: str, as_of: datetime, progress=None) -> tuple[dict, dict]:
+        g_arts, tone = self.gdelt.fetch(company, ticker, as_of, progress)
+        a_arts, _ = self.archive.fetch(company, ticker, as_of, progress)
+        seen, articles = set(), []
+        for a in g_arts.get("articles", []) + a_arts.get("articles", []):
+            if a.get("url") and a["url"] in seen:
+                continue
+            seen.add(a.get("url"))
+            articles.append(a)
+        if progress:
+            progress(f"News: {len(articles)} articles from GDELT and the archive together")
+        return {"articles": articles}, tone
+
+
+def news_source(ticker: str, as_of: datetime, gdelt=None, archive: ArchiveNews | None = None):
+    """GDELT, joined by the saved archive when the archive covers this stock and date."""
+    from mosaic.news import Gdelt
+    archive = archive or ArchiveNews()
+    gdelt = gdelt or Gdelt()
+    return CombinedNews(gdelt, archive) if archive.covers(ticker, as_of) else gdelt
