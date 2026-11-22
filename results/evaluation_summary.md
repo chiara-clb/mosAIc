@@ -47,6 +47,9 @@ The current scorer reproduced all 47 forecasts. July forecasts were for choosing
 | Pooled base rates | 29 | +0.0027 | +0.0022 | +0.0037 | 0.6726 |
 | Pooled + reaction | 32 | +0.0033 | +0.0028 | +0.0040 | 0.6803 |
 | Pooled + reaction + confidence | 11 | +0.0013 | +0.0004 | +0.0030 | 0.6637 |
+| Current, boilerplate pruned (check added after the run) | 18 | −0.0000 | −0.0001 | +0.0001 | 0.6571 |
+
+19 of the 42 lines the tree chose quoted boilerplate. The boilerplate patterns were written from these lines, so this row is in-sample.
 
 ## 5. Results day, three releases (thinking on)
 

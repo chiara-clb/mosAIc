@@ -92,5 +92,6 @@ Consensus values (metric, provider, value) are given to the reader. The provider
 - Public filings may carry little information about the next month that the market has not already priced.
 - With small models, the agent rarely moves away from the baseline.
 - Tree of Thought scores readings with per-stock base rates, which rest on few past events. With thinking on, a single pass does as well.
+- The quote check confirms a quote exists, not that it means anything. A boilerplate check now prunes exhibit references, vote tallies and similar text, which made up 45% of the tree's chosen lines in the 47-forecast run. Its patterns come from that run, so they need checking on new filings.
 - The language models used by the live system may remember 2025 and early 2026 events, so their evaluation uses dates after their knowledge cutoff.
 - Results day has been run on three releases as a demonstration only, with shift sizes fixed by hand. It needs an evaluation on many releases, which would also let the shift sizes be learned.

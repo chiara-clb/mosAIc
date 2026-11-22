@@ -79,4 +79,24 @@ No alternative scorer did better in any group. In the weeks before results, the 
 
 This changes the diagnosis in step 6. A better scorer is not enough for the monthly forecast. The evidence needs to be new, which is what results day is for.
 
+**7b. What the scores did not show: boilerplate.** Preparing the demo, the ledger for Amazon on 30 July kept quoting "are filed as Exhibit 1.1 and Exhibit 4.1 … incorporated herein by reference" as a reason for a fall. Listing every line the tree chose in the 47-forecast run showed that 19 of 42 (45%) were boilerplate: exhibit references, "Refer to Note 14", vote tallies, item headings, a registrant label and a standard definition of legal risk.
+
+The evaluation missed it for four reasons:
+- each such line moves the forecast by only 3 points, so in the averages it only showed as "slightly worse";
+- the critic checks that a quote is really in its source, which boilerplate is, and not that it says anything;
+- the guardrail scenarios planted made-up quotes and hidden instructions, never routine legal text;
+- no one read a sample of the real ledgers until the demo.
+
+The scorer made it worse. A brand-new filing gets full novelty, so its boilerplate outscored "no effect".
+
+The fix (`mosaic/boilerplate.py`) prunes any reading whose quote is boilerplate, as if the quote were made up, and the critic sends back any boilerplate line it finds. Replaying the 47 saved forecasts with the check (`python -m mosaic.rescore`):
+
+| Replay | Forecasts moved | vs baseline, all 47 | July | August | Brier, outcome |
+| --- | --- | --- | --- | --- | --- |
+| Tree of Thought as run | 29 | +0.0017 | +0.0016 | +0.0018 | 0.670 |
+| Boilerplate pruned | 18 | −0.0000 | −0.0001 | +0.0001 | 0.657 |
+| Baseline | 0 | 0 | 0 | 0 | 0.650 |
+
+Pruning boilerplate removes the whole gap with the option market: the tree's measured disadvantage came from boilerplate, not from the real news it read. It does not make the tree better than the baseline, which fits the main finding that the monthly news is already priced. The patterns were written from these same 42 lines, so this replay is in-sample, and a fresh run on new dates is needed to confirm it. The lesson for the evaluation is to read a sample of the actual outputs, not only the scores.
+
 **8. Where it should fit.** The same fragility appears on results day. With thinking off, the reader leaned slightly towards a fall on Amazon's Q2 2026 release. With thinking on, the same release was read towards the gain that happened. Voting over several readings, or a tree with a good scorer, addresses exactly this. A natural home for Tree of Thought is tracing one company's results to its suppliers, customers and competitors. There each link is a branch that can point either way. Past releases give hundreds of cases (how company B moved after company A reported) to score each branch.
