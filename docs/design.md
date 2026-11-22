@@ -22,6 +22,30 @@ where σ is the stock's volatility over the past year, scaled to 21 days. The fo
 
 LangGraph runs the flow. Quant and research run at the same time, synthesis waits for both, and the critic's verdict decides the next step. The roles are written as CrewAI role cards, and with `--backend crewai` the model-backed agents run as CrewAI agents. All tools sit behind one interface that checks the caller's role and the forecast date. The same tools can be served by a real MCP server, and a forecast run through it gives the same result as calling them directly.
 
+## Retrieval
+
+Retrieval follows the dense passage retrieval and MMR labs, with the forecast date built in.
+
+| Step | What happens | Setting |
+| --- | --- | --- |
+| Documents | SEC 10-K, 10-Q and 8-K filings, with the press release (Exhibit 99) of results 8-Ks | 200 days kept for novelty, 30 days searchable |
+| Passages | Split into overlapping passages, each with a header: company, form, section, date | 150 words, 30-word overlap |
+| Embedding | Each passage embedded as "header [SEP] text", as in dense passage retrieval | all-MiniLM-L6-v2, normalised |
+| Date rule | Only the stock's passages accepted in the 30 days before the forecast date are scored at all | Inside the search, not after it |
+| Search | Cosine similarity to the query, then MMR reranking so the results do not repeat each other | 20 candidates, 5 kept, λ = 0.7 |
+| Nothing found | Below this score the search answers "nothing relevant", and the research agent rephrases | 0.20 (0.30 lost most real evidence) |
+| Every filing counts | Each filing in the window is also a candidate on its own, through its passage closest to the filing's own subject, so short 8-Ks are not missed | One passage per filing |
+| What the agents see | The research agent sees a header and a cleaned extract. The synthesis agent reads the full passage, one item at a time, with no search tools | 40-word extract, instruction-like sentences removed |
+| News | GDELT headlines that name the company, grouped into stories by meaning. A story within a few days of a filing on the same topic becomes coverage of that filing, so it is not counted twice | A story needs 2 or more headlines; 3-day link |
+| Novelty | Each passage is compared with the same section of the company's previous filing | Similarity 0.5 or less is new, 0.95 or more is repeated |
+
+The settings come from Checkpoint 3 tests on Apple: a plain top five held 2.6 near-copy pairs per query, and MMR at λ = 0.7 cut this to 0.2 for 3% less relevance. A pool of 10 candidates worked as well as 20.
+
+## Memory
+
+- **Working memory:** the graph state of one run (request, baseline, evidence, readings, ledger, critic feedback), checked at every handoff.
+- **Long-term memory:** the document index, the case memory (past filings of each type and what the stock did in the following month, used as base rates) and the analyst's logged review decisions, which show where the agent keeps being corrected.
+
 ## Main decisions and why
 
 1. **Start from a baseline and adjust in small steps.** A model asked for probabilities directly gives numbers no one can check. A baseline from prices plus cited shifts can be checked line by line, and the analyst can change any line.
@@ -31,6 +55,7 @@ LangGraph runs the flow. Quant and research run at the same time, synthesis wait
 5. **Option prices only for scoring.** They are the market's view, so they are the answer key. Showing them to the agent would make the test meaningless.
 6. **Every check is code where possible.** Dates, quotes, arithmetic and tool permissions are checked in code, which is testable and cannot be talked out of a decision.
 7. **A human sees the risky cases only.** Reviewing every forecast is slow and reviewers stop reading carefully. The risk gate holds a forecast only when at least two of six warning signs appear (large shift, thin evidence, opposite readings scoring alike, low model confidence, a troubled run, a refused tool call). One sign publishes it with a flag.
+8. **No fine-tuning.** There is no labelled set of filings with their effect on the stock, and retrieval keeps every source visible and checkable. A model fine-tuned on market data would also risk learning the answer key.
 
 ## Results day
 
