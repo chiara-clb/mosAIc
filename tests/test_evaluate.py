@@ -212,3 +212,16 @@ def test_five_single_passes_share_one_research_and_are_averaged():
 def test_the_averaged_variant_runs_only_when_asked_for():
     assert E.AVERAGED not in E.VARIANTS and E.AVERAGED in E.ALL_VARIANTS
     assert E.parse_args(["--variants", f"baseline,{E.AVERAGED}"]).variants == f"baseline,{E.AVERAGED}"
+
+
+def test_baseline_with_the_averaged_variant_does_not_pay_for_tree_of_thought(monkeypatch):
+    seen = []
+    real = E.run_forecast
+    monkeypatch.setattr(E, "run_forecast", lambda world, m, **kw: seen.append(kw["options"]["readings"]) or real(world, m, **kw))
+    rows = E.evaluate_one("AAPL", DATES[0], chat(), "scripted", world_factory=fake_world, price_source=fake_prices,
+                          answer_key=fake_key, variants=["baseline", E.AVERAGED])
+    assert [r["variant"] for r in rows] == ["baseline", E.AVERAGED] and seen == ["single"] * 5
+    seen.clear()
+    E.evaluate_one("AAPL", DATES[0], chat(), "scripted", world_factory=fake_world, price_source=fake_prices,
+                   variants=["baseline"])
+    assert seen == ["tot"]                                       # nothing else runs, so ToT gives the baseline

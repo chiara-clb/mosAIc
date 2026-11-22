@@ -183,7 +183,9 @@ def evaluate_one(ticker: str, as_of: datetime, chat: Chat, model_name: str, *, w
             rows.append({**base_row, "variant": variant, **{k: round(probs[k], 2) for k in OUTCOMES},
                          "outcome": outcome or "", "status": status, "review": review, "model_calls": calls})
 
-        need_tot = any(v in variants for v in ("baseline", "baseline + memory", "ToT"))
+        # The baseline comes from any full run; Tree of Thought runs for it only if nothing else does.
+        other_run = any(v in variants for v in ("single pass", AVERAGED))
+        need_tot = "ToT" in variants or (not other_run and any(v in variants for v in ("baseline", "baseline + memory")))
         if need_tot:
             m = Model(chat, None, model_name)
             state, _ = run_forecast(world, m, options={"protocol": "two_way", "readings": "tot"}, engine=engine)
