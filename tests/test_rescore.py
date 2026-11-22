@@ -73,5 +73,23 @@ def test_the_summary_splits_july_from_august_and_lists_every_method():
     s = R.summary(table)
     assert set(s["half"]) == {"all", "choose (July)", "check (August)"}
     assert set(s["method"]) == {"baseline", "ToT as run", "ToT, current", "ToT, confidence", "ToT, reaction",
-                                "ToT, current + confidence"}
+                                "ToT, current + confidence", "ToT, current, no boilerplate"}
     assert (s[s["method"] == "baseline"]["vs baseline"] == 0).all()
+
+
+def test_without_boilerplate_the_tree_falls_back_to_no_effect():
+    boiler = {**reading("fall", score=0.9), "quote": "are filed as Exhibit 1.1 and Exhibit 4.1, and incorporated herein by reference"}
+    rec = record([item("fall", [boiler, reading("none", size=None, score=0.2)])])
+    assert R.rerun(rec, R.current)["fall"] > rec["baseline"]["fall"]
+    assert R.rerun(rec, R.current, drop_boilerplate=True) == pytest.approx(rec["baseline"])
+
+
+def test_real_news_is_kept_without_boilerplate():
+    news = {**reading("gain", score=0.9), "quote": "Apple to spend over $30bn with Broadcom to produce 15 billion US-made chips"}
+    rec = record([item("rise", [news, reading("none", size=None, score=0.2)])])
+    assert R.rerun(rec, R.current, drop_boilerplate=True) == R.rerun(rec, R.current)
+
+
+def test_the_summary_lists_the_no_boilerplate_replay():
+    table = R.rescore([record([item("big rise", [reading("gain"), reading("none", size=None)])])], R.scorers())
+    assert "ToT, current, no boilerplate" in set(table["method"])

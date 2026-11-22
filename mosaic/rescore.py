@@ -35,6 +35,7 @@ import pandas as pd
 
 from mosaic.agents import beam_search, readings_of
 from mosaic.config import OUTCOMES
+from mosaic.boilerplate import is_boilerplate
 from mosaic.ledger import apply_ledger
 from mosaic.scoring import brier, log_loss_implied
 
@@ -97,12 +98,19 @@ def scorers(pooled_base_rate=None) -> dict[str, Scorer]:
 
 # --- rerunning the tree ---------------------------------------------------------------------------
 
-def rerun(rec: dict, scorer: Scorer) -> dict:
-    """The forecast the tree would have made with this scorer. A run that ended in the baseline stays there."""
+def without_boilerplate(r: dict) -> dict:
+    """A reading as the boilerplate check would leave it: pruned if it moves the forecast on boilerplate."""
+    return {**r, "ok": False} if r["effect"] != "none" and is_boilerplate(r.get("quote")) else r
+
+
+def rerun(rec: dict, scorer: Scorer, drop_boilerplate: bool = False) -> dict:
+    """The forecast the tree would have made with this scorer (and, if asked, with the boilerplate check that
+    was added after the run). A run that ended in the baseline stays there."""
     base = rec["baseline"]
     if not rec["items"] or str(rec.get("status") or "").startswith("baseline"):
         return dict(base)
-    prepared = [{"item": it["id"], "readings": [{**r, "score": scorer(rec, it, r)} for r in it["readings"]]}
+    keep = without_boilerplate if drop_boilerplate else (lambda r: r)
+    prepared = [{"item": it["id"], "readings": [keep({**r, "score": scorer(rec, it, r)}) for r in it["readings"]]}
                 for it in rec["items"]]
     choice, _ = beam_search(prepared, base)
     if not choice:
@@ -130,6 +138,7 @@ def rescore(records: list[dict], scorer_set: dict[str, Scorer], split: str = SPL
         methods = {"baseline": dict(rec["baseline"]), "ToT as run": dict(rec["probabilities"])}
         for name, s in scorer_set.items():
             methods[f"ToT, {name}"] = rerun(rec, s)
+        methods["ToT, current, no boilerplate"] = rerun(rec, current, drop_boilerplate=True)
         for name, probs in methods.items():
             moved = max(abs(probs[k] - rec["baseline"][k]) for k in OUTCOMES)
             rows.append({**key, "method": name, **{k: round(probs[k], 2) for k in OUTCOMES},
@@ -210,6 +219,9 @@ def main(argv=None) -> None:
     folder = Path(a.folder)
     records = load(folder / "readings.jsonl")
     print(f"{len(records)} forecasts with saved readings.")
+    lines = [it["readings"][c] for r in records for it, c in zip(r["items"], r.get("choice") or [])
+             if c is not None and c < len(it["readings"]) and it["readings"][c]["effect"] != "none"]
+    print(f"Lines the tree chose: {len(lines)}, of which boilerplate: {sum(is_boilerplate(x.get('quote')) for x in lines)}.")
     base_rate = None
     if a.pooled:
         from mosaic.config import UNIVERSE
