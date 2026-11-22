@@ -61,7 +61,7 @@ Comparison over the nine scenarios (36 evidence items in total):
 | **Critic with reasons (the design)** | **31** | **0** | **0** | **18.1** |
 | A single agent with all tools | 30 | 2 | 2 | 12.9 |
 
-The critic's loop stops made-up quotes, and its reasons are what let a retry fix them. A single agent is cheaper but follows instructions hidden in a filing. The design costs about 40% more model calls than a one-way pipeline.
+The package rerun in `results/ablation.md` gives slightly different counts (32 of 36 items for the design), because the package version differs a little from the notebook. The conclusions are the same. The critic's loop stops made-up quotes, and its reasons are what let a retry fix them. A single agent is cheaper but follows instructions hidden in a filing. The design costs about 40% more model calls than a one-way pipeline.
 
 With a real model (Qwen2.5-3B), the coordination held: the critic's hint led research to the missing filing, and no hidden instruction was followed. The model itself searched poorly and read every item as "no effect", which led to two guards in research (empty or repeated searches are not run, and recent filings are always listed).
 
@@ -82,7 +82,7 @@ Each guardrail stops a different failure, and no other guardrail covers for it. 
 
 ## 5. Real stocks against the option market
 
-`python -m mosaic.evaluate`: AAPL, MSFT and JPM, every Wednesday from 1 July to 19 August 2026, after Claude's knowledge cutoff. 24 stock-dates, of which 23 ran (one stopped with an error), with Claude Haiku 5.5 and news from GDELT. Asked before each forecast, the model claimed to remember the following month for none of them. The main score is log loss against the probabilities implied by FirstRate option prices on the forecast date (lower is better).
+`python -m mosaic.evaluate`: AAPL, MSFT and JPM, every Wednesday from 1 July to 19 August 2026, after Claude's knowledge cutoff. 24 stock-dates, of which 23 ran (one stopped with an error), with Claude Haiku 5.5 (thinking off) and news from GDELT. Asked before each forecast, the model claimed to remember the following month for none of them. The main score is log loss against the probabilities implied by FirstRate option prices on the forecast date (lower is better).
 
 | Variant | Log loss vs options | Difference from baseline (95% interval) | Log loss vs outcome | Brier vs outcome | Model calls per forecast |
 | --- | --- | --- | --- | --- | --- |
@@ -96,7 +96,7 @@ What this shows:
 
 - **The agent's adjustments did not bring the forecast closer to the option market.** Tree of Thought ended slightly further from the market's view than the price baseline (1.0937 against 1.0897), within the margin of error. Baseline + memory was closer by 0.0002, because the model barely changed the baseline.
 - **Only the prompt-only model was clearly further away.**
-- **Tree of Thought did better than a single pass,** most clearly against what actually happened (Brier 0.650 against 0.680). Comparing readings avoided the first reading's mistakes, as in section 2.
+- **Tree of Thought did better than a single pass,** most clearly against what actually happened (Brier 0.650 against 0.680). Comparing readings avoided the first reading's mistakes, as in section 2. With thinking on, this gap closed (below).
 - **All variants missed a rising market.** Every variant gave a large gain about a 33% chance, while large gains happened in about 60–67% of these weeks and large falls in about 12%.
 - **The test is small** (3 stocks, 8 weeks) and GDELT refused many news requests, so many forecasts had little evidence and the intervals are wide.
 
@@ -112,7 +112,7 @@ The same 23 forecasts, rerun with Claude Haiku 5.5 thinking before each answer (
 | Single pass | 1.090 | +0.001 (−0.003 to +0.004) | 1.078 | 0.653 |
 | Tree of Thought | 1.092 | +0.002 (−0.000 to +0.005) | 1.099 | 0.666 |
 
-The picture against the option market is the same: no variant beats the baseline, and only prompt only is clearly worse. Thinking helped the single pass most (1.097 to 1.090, Brier 0.680 to 0.653), and it now does slightly better than Tree of Thought. Comparing four readings helped when the model answered at once. Once it reasons before answering, the tree adds little with the current scorer, which uses thin per-stock base rates. The results-day demonstration below was run with thinking off.
+The picture against the option market is the same: no variant beats the baseline, and only the prompt-only model is clearly worse. Thinking helped the single pass most (1.097 to 1.090, Brier 0.680 to 0.653), and it now does slightly better than Tree of Thought. Comparing four readings helped when the model answered at once. Once it reasons before answering, the tree adds little with the current scorer, which uses thin per-stock base rates. The results-day demonstration below was run with thinking off.
 
 ## 6. Results day: a demonstration on three releases
 
