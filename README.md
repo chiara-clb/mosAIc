@@ -6,7 +6,7 @@ For one of 30 large-cap stocks and a date, it gives three probabilities: a large
 
 The name comes from the "mosaic theory" of equity research, where analysts build a view from many small pieces of public information.
 
-Capstone project for the CMU Agentic AI program, 2026.
+Capstone project for the CMU Agentic AI Program: Building Autonomous Systems for Real-World Applications, 2026.
 
 ## Who it is for
 
