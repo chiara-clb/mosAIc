@@ -37,7 +37,7 @@ Against the four design questions of the Tree of Thoughts paper (Yao et al., 202
 
 These counts rest on 12–14 forecasts each, so they are hints, not findings.
 
-**6. The diagnosis.** The lab shows when Tree of Thought pays off. Each step must depend on the previous one, the evaluator must recognise good partial solutions, and the cases must be hard enough that a single chain fails. Monthly forecasting from news that is mostly already priced meets none of the three. The items are nearly independent, the scorer rests on few past events per stock, and many dates have little evidence (about half the Checkpoint 4 forecasts had at most one item). So the method is sound, but this problem does not give it what it needs.
+**6. The first diagnosis.** The lab shows when Tree of Thought pays off. Each step must depend on the previous one, the evaluator must recognise good partial solutions, and the cases must be hard enough that a single chain fails. Monthly forecasting from news that is mostly already priced meets none of the three. The items are nearly independent, the scorer rests on few past events per stock, and many dates have little evidence (about half the Checkpoint 4 forecasts had at most one item). So the method is sound, but this problem does not give it what it needs.
 
 **7. Can a better scorer help?** `python -m mosaic.rescore` replays the saved readings of a Tree of Thought run with other scorers, without new model calls. The scorers were fixed before any result was seen:
 - the model's own confidence;
@@ -45,6 +45,28 @@ These counts rest on 12–14 forecasts each, so they are hints, not findings.
 - base rates pooled across all 30 stocks;
 - their averages.
 
-July forecasts are for choosing, and August ones for checking, and every scorer is reported. The run covers AAPL, MSFT, JPM, AMZN, GOOGL and NVDA from 1 July to 19 August 2026. *Results: to be added.*
+July forecasts are for choosing, and August ones for checking, and every scorer is reported. The run covers AAPL, MSFT, JPM, AMZN, GOOGL and NVDA from 1 July to 19 August 2026: 47 forecasts (AAPL on 19 August fails on its option file), with thinking on and the same saved news. The replay with the current scorer reproduced all 47 forecasts exactly.
+
+On this larger sample the tree as run is slightly but clearly further from the option market than the baseline: +0.0017 in log loss, 95% interval +0.0006 to +0.0029.
+
+| Scorer | Forecasts moved | vs baseline, all 47 | July (choose, 30) | August (check, 17) |
+| --- | --- | --- | --- | --- |
+| Model confidence | 2 | −0.0006 | −0.0010 | 0.0000 |
+| Current + confidence | 13 | +0.0006 | +0.0008 | +0.0001 |
+| Pooled + reaction + confidence | 11 | +0.0013 | +0.0004 | +0.0030 |
+| Reaction | 18 | +0.0014 | −0.0003 | +0.0044 |
+| Current (the run) | 29 | +0.0017 | +0.0016 | +0.0018 |
+| Pooled base rates | 29 | +0.0027 | +0.0022 | +0.0037 |
+| Pooled + reaction | 32 | +0.0033 | +0.0028 | +0.0040 |
+
+What this shows:
+
+- **No scorer passes.** Only model confidence comes out ahead, and only because it almost never moves the forecast (2 of 47, none in August). The price reaction helped in July and failed in August, which is what noise looks like.
+- **Pooling base rates across all 30 stocks made it worse.** Thin per-stock base rates were not the main problem.
+- **The more a scorer moves the forecast, the worse it scores.** The order is almost perfect, from 2 moves to 32. So the readings themselves carry almost nothing that the option market has not already priced. No way of choosing among them can help. In the lab's terms, neither the generator nor the evaluator has a signal to work with.
+
+One data note: the pooled memory found only 8 filings for XOM, which looks like a lookup problem. It affects only the pooled scorers, and only slightly.
+
+This changes the diagnosis in step 6. A better scorer is not enough for the monthly forecast. The evidence needs to be new, which is what results day is for.
 
 **8. Where it should fit.** The same fragility appears on results day. With thinking off, the reader leaned slightly towards a fall on Amazon's Q2 2026 release. With thinking on, the same release was read towards the gain that happened. Voting over several readings, or a tree with a good scorer, addresses exactly this. A natural home for Tree of Thought is tracing one company's results to its suppliers, customers and competitors. There each link is a branch that can point either way. Past releases give hundreds of cases (how company B moved after company A reported) to score each branch.
