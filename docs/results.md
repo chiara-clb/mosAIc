@@ -100,6 +100,20 @@ What this shows:
 - **All variants missed a rising market.** Every variant gave a large gain about a 33% chance, while large gains happened in about 60–67% of these weeks and large falls in about 12%.
 - **The test is small** (3 stocks, 8 weeks) and GDELT refused many news requests, so many forecasts had little evidence and the intervals are wide.
 
+### With thinking on
+
+The same 23 forecasts, rerun with Claude Haiku 5.5 thinking before each answer (`--news-offline`, so the news is the same as in the first run). AAPL on 19 August fails in both runs on a duplicated row in that day's option file.
+
+| Variant | Log loss vs options | vs baseline (95% interval) | Log loss vs outcome | Brier vs outcome |
+| --- | --- | --- | --- | --- |
+| Baseline | 1.090 | | 1.071 | 0.647 |
+| Prompt only | 1.108 | +0.019 (+0.004 to +0.032) | 1.056 | 0.644 |
+| Baseline + memory | 1.089 | −0.000 (−0.002 to +0.001) | 1.067 | 0.645 |
+| Single pass | 1.090 | +0.001 (−0.003 to +0.004) | 1.078 | 0.653 |
+| Tree of Thought | 1.092 | +0.002 (−0.000 to +0.005) | 1.099 | 0.666 |
+
+The picture against the option market is the same: no variant beats the baseline, and only prompt only is clearly worse. Thinking helped the single pass most (1.097 to 1.090, Brier 0.680 to 0.653), and it now does slightly better than Tree of Thought. Comparing four readings helped when the model answered at once. Once it reasons before answering, the tree adds little with the current scorer, which uses thin per-stock base rates. The results-day demonstration below was run with thinking off.
+
 ## 6. Results day: a demonstration on three releases
 
 `python -m mosaic.results_day --read`, Claude Haiku 5.5, Q2 2026 releases after the close. It was added late, so this is only a demonstration of the flow and its guardrails. Three events cannot tell whether the reader helps.
