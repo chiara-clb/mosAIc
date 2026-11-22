@@ -27,9 +27,9 @@ Every tool returns only data published before the forecast date, and every step 
 
 ## How it is evaluated
 
-The main test is how close the forecast gets to the probabilities implied by option prices on the forecast date. Option prices are used only for scoring and are never shown to the agent. Forecasts are also compared with what actually happened, and with simpler baselines (price history only, a prompt-only model, the agent without Tree of Thought).
+The main test is how close the forecast gets to the probabilities implied by option prices on the forecast date. Option prices are used only for scoring and are never shown to the agent. Forecasts are also compared with what actually happened, and with simpler variants: price history only, a prompt-only model, the baseline adjusted from the model's memory, and the agent without Tree of Thought.
 
-Results so far are in [docs/results.md](docs/results.md).
+The results are in [docs/results.md](docs/results.md). In short, no variant got closer to the option market than the price baseline, because most of the news is already in the price. That led to the second mode, results day (below).
 
 ## What is in this repository
 
@@ -39,9 +39,9 @@ Results so far are in [docs/results.md](docs/results.md).
 | `notebooks/` | Three tested notebooks: the Tree of Thought step on real filings, the baseline comparison, and the full multi-agent system with its guardrails. See [notebooks/README.md](notebooks/README.md) |
 | `tests/` | Tests for the package and for the notebooks' code |
 | `docs/design.md` | The design, the main decisions and how they changed during the program |
-| `docs/results.md` | What the notebooks showed |
-| `docs/figures/` | Architecture diagrams |
-| `results/` | The guardrail ablation and design comparison on the demo scenarios, and the evaluation on real stocks once it has run |
+| `docs/results.md` | All results: the notebooks, the guardrail ablation, the evaluation on real stocks and the results-day demonstration |
+| `docs/figures/` | Architecture diagrams. `figure1_final.png` is the final system, and the other files are earlier checkpoints |
+| `results/` | The guardrail ablation and design comparison on the demo scenarios. The evaluation on real stocks writes here too, but its files use licensed option data and stay out of the repository |
 
 The notebooks are where each part was first tested. The package holds the final version of the same code.
 
@@ -68,6 +68,8 @@ python -m mosaic.cli AAPL --as-of 2026-07-15 --backend anthropic --model claude-
 
 Filings, prices and news are cached under `data/`, so a second run on the same stock is fast.
 
+Claude thinks before each answer by default. `MOSAIC_LLM_THINKING=off` turns this off, as in the first evaluation.
+
 **Other ways to run the agents.** `--backend crewai` runs the model-backed agents as CrewAI agents (`pip install -e ".[crew]"`). The tools can also be served as a real MCP server, which any MCP client can call; the forecast-date rule runs inside each tool:
 
 ```bash
@@ -81,15 +83,20 @@ python -m mosaic.mcp_server --demo                  # or --ticker AAPL --as-of 2
 python -m mosaic.ablation
 ```
 
-**The evaluation on real stocks** forecasts every Wednesday from July 2026 (after the Claude models' knowledge cutoff) with five variants: baseline, prompt only, baseline with the model's memory, single pass and Tree of Thought. It first asks the model whether it remembers what the stock did, and reports scores with and without those dates. With `--options-dir` pointing at a folder of FirstRate option files, the main score is log loss against the option-implied probabilities:
+**The evaluation on real stocks** forecasts every Wednesday from July 2026 (after the Claude models' knowledge cutoff) with five variants: baseline, prompt only, baseline with the model's memory, single pass and Tree of Thought. It first asks the model whether it remembers what the stock did, and reports scores with and without those dates. With `--options-dir` pointing at a folder of FirstRate option files, the main score is log loss against the option-implied probabilities. The run reported in `docs/results.md`:
 
 ```bash
 python -m mosaic.evaluate --backend anthropic --model claude-haiku-5-5 \
-  --tickers AAPL,NKE,INTC,MSFT,JPM,XOM --start 2026-07-01 --end 2026-10-15 \
-  --options-dir data/firstrate --resume
+  --tickers AAPL,MSFT,JPM --start 2026-07-01 --end 2026-08-19 \
+  --options-dir data/firstrate --out results/evaluation_thinking
 ```
 
-Add `--limit 2` for a cheap first try. Results go to `results/evaluation/`, and `--resume` continues an interrupted run.
+Useful options:
+
+- `--limit 2` for a cheap first try, and `--resume` to continue an interrupted run.
+- `--news-offline` uses only news already saved on disk and never calls GDELT, so a rerun sees the same news and does not wait on refused requests.
+- `--thinking off` reproduces the first run, without thinking.
+- `--variants "baseline,5 single passes"` runs a sixth variant on its own: one research step, then the single pass five times, averaged. It checks whether Tree of Thought adds more than repeating and averaging.
 
 **Results day: forecasting right after results.** For a stock that reports after the close, the agents forecast the move to the next day's close, a few minutes after the release. It runs as a second LangGraph flow built from the same parts as the monthly forecast (`mosaic/results_graph.py`):
 
@@ -110,7 +117,7 @@ python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate       
 python -m mosaic.results_day AMZN 2026-07-30 --options-dir data/firstrate --read   # the full flow, with Claude
 ```
 
-It is also the third choice in the app's sidebar. A research agent that writes an expectations brief before the release is the next step.
+It is also the third choice in the app's sidebar. It has been run on three releases as a demonstration (`docs/results.md`, section 6). Evaluating it needs many more releases.
 
 **In the browser** (a simple Streamlit screen):
 
@@ -119,7 +126,7 @@ pip install -e ".[ui]"
 streamlit run app.py
 ```
 
-Choose the demo company and a scenario (or a real stock), press **Run forecast**, and see the forecast against the baseline, the ledger with its sources and dates, the risk gate's decision, and how the agents got there: evidence, every Tree of Thought reading with its scores, each step and each tool call. A held forecast can be reviewed line by line (keep, resize or strike).
+Choose the demo company and a scenario, a real stock, or results day, press **Run forecast**, and see the forecast against the baseline, the ledger with its sources and dates, the risk gate's decision, and how the agents got there: evidence, every Tree of Thought reading with its scores, each step and each tool call. A held forecast can be reviewed line by line (keep, resize or strike).
 
 **In a notebook, no setup needed:** open `notebooks/multi_agent/checkpoint5_multi_agent.ipynb` in Google Colab and choose Run all. It runs in seconds on a small synthetic company and shows nine scenarios, including the guardrails at work. To use a real model, set `MODE = "real"` in section 1 (needs a GPU runtime for Qwen, or an Anthropic API key).
 
@@ -138,4 +145,4 @@ python notebooks/build.py notebooks/multi_agent/notebook.src notebooks/multi_age
 
 ## Data
 
-All data is public: SEC EDGAR filings, GDELT news headlines and daily prices. Option prices for scoring come from FirstRate Data and are licensed, so they are not included in this repository. `mosaic/firstrate.py` reads their files as they come (one file per stock and quarter, plain or zipped). The files have no stock price column, so the price is taken from the daily closes or, failing that, worked out from the option prices themselves (put-call parity).
+Filings (SEC EDGAR), news headlines (GDELT) and daily prices are public. Option prices come from FirstRate Data and are licensed, so they are not included in this repository. The analysts' consensus estimates used by results day are not included either. Each one is a small JSON file in `data/consensus/` with the metric, provider, value and date. `mosaic/firstrate.py` reads their files as they come (one file per stock and quarter, plain or zipped). The files have no stock price column, so the price is taken from the daily closes or, failing that, worked out from the option prices themselves (put-call parity).
