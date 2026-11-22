@@ -65,7 +65,7 @@ What this shows:
 - **Pooling base rates across all 30 stocks made it worse.** Thin per-stock base rates were not the main problem.
 - **The more a scorer moves the forecast, the worse it scores.** The order is almost perfect, from 2 moves to 32. So the readings themselves carry almost nothing that the option market has not already priced. No way of choosing among them can help. In the lab's terms, neither the generator nor the evaluator has a signal to work with.
 
-One data note: the pooled memory found only 8 filings for XOM, which looks like a lookup problem. It affects only the pooled scorers, and only slightly.
+One data note: in this run the pooled memory found only 8 filings for XOM, because the ticker now points to ExxonMobil's new holding company. The lookup now also reads the old company's filings (464 in all). This affected only the pooled scorers, and only slightly.
 
 **A check on the hard cases.** The paper tested Tree of Thought on deliberately hard puzzles, where a single chain fails. The closest thing here is the weeks before a results release, when there is more news and a big move is coming. The 47 forecasts were split into three groups (log loss against the options, compared with the baseline, so positive is worse):
 
