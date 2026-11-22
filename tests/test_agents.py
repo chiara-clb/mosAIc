@@ -257,3 +257,39 @@ def test_news_can_be_listed_without_a_matching_query():
     listed = tools.search_news("", list_all=True)
     assert listed and all(h["kind"] == "news" for h in listed)
     assert all(tools.passage(h["id"]) is not None for h in listed)          # nothing after the forecast date
+
+
+# --- boilerplate ------------------------------------------------------------------------------
+
+BOILERPLATE_READINGS = [{"effect": "fall", "size": "medium",
+                         "quote": "are filed as Exhibit 1.1 and Exhibit 4.1, respectively, and incorporated herein by reference",
+                         "reason": "New debt could weigh on the stock."},
+                        {"effect": "none", "size": "small", "quote": "", "reason": "Routine filing text."}]
+
+
+def boilerplate_script():
+    return {"readings": dict(DEFAULT_SCRIPT["readings"], F1=BOILERPLATE_READINGS), "lenient_judge": True}
+
+
+def test_a_reading_that_rests_on_boilerplate_is_pruned_even_if_the_judge_would_accept_it():
+    s, run, _ = ready(script=boilerplate_script())
+    through(s, run, "synthesis")
+    f1 = next(p for p in s["tot"]["prepared"] if p["item"] == "F1")
+    assert f1["readings"][0]["ok"] is False and f1["readings"][0]["check"] == "boilerplate"
+    assert chosen(s)["F1"] == "none" and "F1" not in {line["source"] for line in s["ledger"]}
+
+
+def test_the_boilerplate_check_can_be_switched_off_for_the_ablation():
+    s, run, _ = ready(script=boilerplate_script(), guardrails_off=("boilerplate",))
+    run.tools.off = {"boilerplate"}
+    through(s, run, "synthesis")
+    assert chosen(s)["F1"] == "fall"
+
+
+def test_the_critic_sends_a_boilerplate_line_back_with_the_reason(monkeypatch):
+    s, run, _ = ready()
+    through(s, run, "synthesis")
+    quoted = s["ledger"][0]["quote"]
+    monkeypatch.setattr(A, "is_boilerplate", lambda q: q == quoted)
+    through(s, run, "critic")
+    assert s["verdict"]["route"] == "synthesis" and "boilerplate" in s["feedback"][0]

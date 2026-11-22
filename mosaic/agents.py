@@ -14,6 +14,7 @@ from datetime import timedelta
 
 import numpy as np
 
+from mosaic.boilerplate import is_boilerplate, reason as boilerplate_reason
 from mosaic.baseline import baseline
 from mosaic.config import OUTCOMES, SETTINGS
 from mosaic.handoffs import handoff, problems_baseline, problems_reading
@@ -238,6 +239,9 @@ def read_item(item: dict, feedback: list, run: Run, agent: str = "synthesis", ju
         if r["effect"] == "none":
             r["ok"] = True
             continue
+        if "boilerplate" not in run.tools.off and is_boilerplate(r.get("quote")):
+            r["ok"], r["check"] = False, "boilerplate"     # real text, but no news: pruned like a made-up quote
+            continue
         v = run.ask(judge, JUDGE_TASK, {"passage": item["full_text"], "quote": r["quote"], "claim": r.get("reason", "")}, 30) or {}
         r["ok"] = bool(v.get("supported"))
     readings.append(dict(NO_EFFECT))
@@ -369,6 +373,8 @@ def critic(state: dict, run: Run) -> dict:
             reasons.append(f"{line['source']}: cited source is not in the evidence or was published after the forecast date")
         elif norm(line["quote"]) not in norm(p["text"]):
             reasons.append(f"{line['source']}: the quote '{line['quote']}' does not appear in the passage")
+        elif "boilerplate" not in run.tools.off and is_boilerplate(line["quote"]):
+            reasons.append(f"{line['source']}: {boilerplate_reason(line['quote'])}")
     fc, base = state.get("forecast") or {}, state.get("baseline") or {}
     reasons += [f"forecast {p}" for p in problems_baseline(fc)] if fc else []
     if fc and base and max(abs(fc[k] - base[k]) for k in OUTCOMES) > SETTINGS.max_total_shift + 0.05:
