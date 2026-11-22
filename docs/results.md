@@ -116,6 +116,9 @@ The picture against the option market is the same: no variant beats the baseline
 
 ### Five single passes, averaged
 
+The full story of these Tree of Thought tests, with the comparison to the course lab, is in [tree_of_thought.md](tree_of_thought.md).
+
+
 To check whether Tree of Thought adds more than repeating and averaging, the single pass was run five times on one shared research step and the five forecasts were averaged (`--variants "baseline,5 single passes"`, thinking on, same saved news). Each run did its own research, so a small part of the differences between runs comes from different searches.
 
 | Variant (thinking on) | Log loss vs options | vs baseline (95% interval) | Log loss vs outcome | Brier vs outcome | Model calls per forecast |

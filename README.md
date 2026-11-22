@@ -53,7 +53,7 @@ The screenshots below come from the Streamlit app (`streamlit run app.py`). The 
 
 The main test is how close the forecast gets to the probabilities implied by option prices on the forecast date. Option prices are used only for scoring and are never shown to the agent. Forecasts are also compared with what actually happened, and with simpler variants: price history only, a prompt-only model, the baseline adjusted from the model's memory, and the agent without Tree of Thought.
 
-The results are in [docs/results.md](docs/results.md). In short, no variant got closer to the option market than the price baseline, because most of the news is already in the price. That led to the second mode, results day (below).
+The results are in [docs/results.md](docs/results.md). In short, no variant got closer to the option market than the price baseline, because most of the news is already in the price. That led to the second mode, results day (below). [docs/tree_of_thought.md](docs/tree_of_thought.md) follows how Tree of Thought was tested, step by step, against the controls from the course lab.
 
 ## What is in this repository
 
@@ -63,6 +63,7 @@ The results are in [docs/results.md](docs/results.md). In short, no variant got 
 | `notebooks/` | Three tested notebooks: the Tree of Thought step on real filings, the baseline comparison, and the full multi-agent system with its guardrails. See [notebooks/README.md](notebooks/README.md) |
 | `tests/` | Tests for the package and for the notebooks' code |
 | `docs/design.md` | The design, the main decisions and how they changed during the program |
+| `docs/tree_of_thought.md` | How Tree of Thought was built and tested, step by step, and what it really adds |
 | `docs/results.md` | All results: the notebooks, the guardrail ablation, the evaluation on real stocks and the results-day demonstration |
 | `docs/figures/` | Architecture diagrams. `figure1_final.png` is the final system, and the other files are earlier checkpoints |
 | `results/` | The guardrail ablation and design comparison on the demo scenarios. The evaluation on real stocks writes here too, but its files use licensed option data and stay out of the repository |
