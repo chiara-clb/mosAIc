@@ -346,6 +346,18 @@ def synthesis(state: dict, run: Run, agent: str = "synthesis", judge: str = "cri
 # --- critic ------------------------------------------------------------------------------------
 
 EVENT_WORDS = r"\b(resign\w*|step(s|ping)? down|appoint\w*|results|merger|acquir\w*|agreement|settle\w*)\b"
+# A fund buying or selling the stock ("Park National Corp OH Acquires 4,761 Shares of Apple Inc.") is not a
+# company event, and no filing by the company would ever confirm it.
+HOLDINGS = r"\b(acquir\w*|buy\w*|bought|sell\w*|sold|purchas\w*|trim\w*|boost\w*|rais\w*|cut\w*|lower\w*|" \
+           r"increas\w*|reduc\w*|add\w*)\b[^|]*\b(shares|stake|position|holdings?)\b"
+
+
+def company_event(full_text: str) -> str | None:
+    """The first headline that reports a company event (and is not a fund trading the stock), or None."""
+    for headline in full_text.split(" | "):
+        if re.search(EVENT_WORDS, headline, re.I) and not re.search(HOLDINGS, headline, re.I):
+            return headline
+    return None
 
 
 def norm(text: str) -> str:
@@ -358,11 +370,11 @@ def critic(state: dict, run: Run) -> dict:
     evidence = {e["id"]: e for e in state["evidence"]}
     reasons, hints, to_research = [], [], False
     for e in evidence.values():                       # news about a company event needs its filing
-        if e["kind"] == "news" and re.search(EVENT_WORDS, e["full_text"], re.I):
+        headline = company_event(e["full_text"]) if e["kind"] == "news" else None
+        if headline:
             near = [f for f in evidence.values() if f["kind"] == "filing"
                     and abs((f["published"] - e["published"]).total_seconds()) <= SETTINGS.news_link_days * 86400]
             if not near:
-                headline = e["full_text"].split(" | ")[0]
                 reasons.append(f"{e['id']}: the news reports a company event ('{headline}') but the filing "
                                f"behind it is not in the evidence")
                 hints.append(headline)

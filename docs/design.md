@@ -18,7 +18,7 @@ where σ is the stock's volatility over the past year, scaled to 21 days. The fo
 | Quant | Calculates the baseline from prices (code only) | Market data | Prices before the forecast date |
 | Research | Searches filings and news in a loop of up to 4 steps | Document search, news search | A header and a 40-word cleaned extract per result |
 | Synthesis | Turns evidence into ledger lines with Tree of Thought | Case memory, branch log | The full passages |
-| Critic | Checks quotes, dates and arithmetic, accepts or sends back with a reason | Fetch a passage by its id | The ledger and the passages |
+| Critic | Checks quotes, dates and arithmetic, and that news of a company event (an agreement, a resignation, results) has its filing; accepts or sends back with a reason | Fetch a passage by its id | The ledger and the passages |
 
 LangGraph runs the flow. Quant and research run at the same time, synthesis waits for both, and the critic's verdict decides the next step. The roles are written as CrewAI role cards, and with `--backend crewai` the model-backed agents run as CrewAI agents. All tools sit behind one interface that checks the caller's role and the forecast date. The same tools can be served by a real MCP server, and a forecast run through it gives the same result as calling them directly.
 
@@ -94,5 +94,6 @@ Consensus values (metric, provider, value) are given to the reader. The provider
 - Tree of Thought scores readings with per-stock base rates, which rest on few past events. With thinking on, a single pass does as well.
 - The quote check confirms a quote exists, not that it means anything. A boilerplate check now prunes exhibit references, vote tallies and similar text, which made up 45% of the tree's chosen lines in the 47-forecast run. Its patterns come from that run, so they need checking on new filings.
 - The language models used by the live system may remember 2025 and early 2026 events, so their evaluation uses dates after their knowledge cutoff.
+- The critic finds company events in news by keywords. Until a fix on 23 November 2026, a fund buying the stock ("… Acquires 4,761 Shares of Apple") also counted, so the critic asked for a filing that could not exist and the run fell back to the baseline. Headlines about funds trading the stock are now skipped. Runs in the evaluation used the old rule.
 - News for Amazon, Alphabet and Nvidia in the 47-forecast run came only from archived web pages: about a dozen articles per stock, from the week before results. Their monthly forecasts rest on very little news. GDELT headlines can now be downloaded for them (`mosaic.news_download`).
 - Results day has been run on three releases as a demonstration only, with shift sizes fixed by hand. It needs an evaluation on many releases, which would also let the shift sizes be learned.

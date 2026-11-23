@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from mosaic import agents as A
 from mosaic.config import SETTINGS
@@ -293,3 +294,14 @@ def test_the_critic_sends_a_boilerplate_line_back_with_the_reason(monkeypatch):
     monkeypatch.setattr(A, "is_boilerplate", lambda q: q == quoted)
     through(s, run, "critic")
     assert s["verdict"]["route"] == "synthesis" and "boilerplate" in s["feedback"][0]
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("Park National Corp OH Acquires 4 , 761 Shares of Apple Inc . $AAPL | Apple and Intel Just Signed a Historic Chip Partnership", None),
+    ("Lane Brothers Boosts Stake in Apple Inc. | Vanguard Group Sells 1,200 Shares of Apple", None),
+    ("Park National Corp OH Acquires 4 , 761 Shares of Apple | Acme CFO to resign at month end", "Acme CFO to resign at month end"),
+    ("Microsoft agreement to acquire a security start-up", "Microsoft agreement to acquire a security start-up"),
+    ("Apple to spend over $30bn with Broadcom", None),
+])
+def test_a_company_event_is_found_per_headline_and_funds_trading_the_stock_are_not_events(text, expected):
+    assert A.company_event(text) == expected
