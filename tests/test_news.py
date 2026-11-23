@@ -250,3 +250,12 @@ def test_an_invalid_search_is_not_retried(tmp_path, capsys):
     g = Gdelt(tmp_path / "c.json", http_get=bad, spacing=0, retries=3)
     assert g({"mode": "artlist", "query": "x"}) == {}
     assert len(calls) == 1 and g.errors[0].startswith("artlist: invalid search")
+
+
+def test_offline_progress_says_a_missing_day_is_skipped_not_downloaded(tmp_path):
+    calls, lines = [], []
+    g = Gdelt(tmp_path / "c.json", http_get=lambda p: calls.append(p), spacing=0, offline=True)
+    g.fetch("Apple Inc.", "AAPL", datetime(2026, 7, 1, tzinfo=timezone.utc), progress=lines.append)
+    days = [x for x in lines if x.startswith("News: ") and "days" in x]
+    assert calls == [] and days and all("skipped (offline)" in x for x in days)
+    assert not any("downloading" in x for x in lines)

@@ -244,7 +244,8 @@ class Gdelt:
             params = day_params(q, start, end)
             if progress:
                 saved = json.dumps(params, sort_keys=True) in self.cache
-                progress(f"News: {start:%d %b} ({n} of {len(days)} days, {'saved' if saved else 'downloading'})")
+                missing = "not saved, skipped (offline)" if self.offline else "downloading"
+                progress(f"News: {start:%d %b} ({n} of {len(days)} days, {'saved' if saved else missing})")
             day = self(params)
             for a in (day or {}).get("articles", []):
                 key = (a.get("url"), a.get("title"), a.get("seendate"))       # the same article returned twice
